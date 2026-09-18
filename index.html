@@ -1,0 +1,1998 @@
+<!DOCTYPE html>
+<html lang="vi" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FocusFlow - Ứng Dụng Quản Lý Thời Gian & Pomodoro Toàn Diện</title>
+  <meta name="description" content="Quản lý thời gian, bảng việc Kanban thông minh, đồng hồ Pomodoro kết hợp âm thanh chuông báo và bảng thống kê năng suất chi tiết." />
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              200: '#c7d2fe',
+              300: '#a5b4fc',
+              400: '#818cf8',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+              800: '#3730a3',
+              900: '#312e81',
+            }
+          },
+          fontFamily: {
+            sans: ['Plus Jakarta Sans', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- React 18 & Babel CDN -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Canvas Confetti CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.browser.min.js"></script>
+
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    /* Glassmorphism & Custom Styling */
+    .font-mono-timer {
+      font-family: 'JetBrains Mono', monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .glass-card {
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(229, 231, 235, 0.9);
+    }
+
+    .dark .glass-card {
+      background: rgba(17, 24, 39, 0.75);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .glass-nav {
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(229, 231, 235, 0.8);
+    }
+
+    .dark .glass-nav {
+      background: rgba(11, 15, 25, 0.85);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    }
+
+    .ambient-glow {
+      position: absolute;
+      filter: blur(90px);
+      opacity: 0.18;
+      pointer-events: none;
+      z-index: 0;
+      border-radius: 50%;
+    }
+
+    .dark .ambient-glow {
+      opacity: 0.12;
+    }
+
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(156, 163, 175, 0.3);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(156, 163, 175, 0.5);
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fade-in {
+      animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 dark:bg-[#090D16] text-slate-900 dark:text-slate-100 min-h-screen font-sans antialiased transition-colors duration-300 selection:bg-brand-500 selection:text-white">
+  <div id="root"></div>
+
+  <!-- Main Application Script (Babel compiled) -->
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // --- Web Audio API Synthesizer ---
+    class SoundEffects {
+      constructor() {
+        this.ctx = null;
+      }
+      getAudioContext() {
+        if (!this.ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) this.ctx = new AudioCtx();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+        return this.ctx;
+      }
+      playFocusCompleteSound(volume = 0.8) {
+        const ctx = this.getAudioContext();
+        if (!ctx) return;
+        const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+        const now = ctx.currentTime;
+        notes.forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + idx * 0.12);
+          gain.gain.setValueAtTime(0, now + idx * 0.12);
+          gain.gain.linearRampToValueAtTime(0.3 * volume, now + idx * 0.12 + 0.04);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.12 + 1.8);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + idx * 0.12);
+          osc.stop(now + idx * 0.12 + 2.0);
+        });
+      }
+      playBreakCompleteSound(volume = 0.8) {
+        const ctx = this.getAudioContext();
+        if (!ctx) return;
+        const notes = [440, 554.37, 659.25]; // A4, C#5, E5
+        const now = ctx.currentTime;
+        notes.forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, now + idx * 0.15);
+          gain.gain.setValueAtTime(0, now + idx * 0.15);
+          gain.gain.linearRampToValueAtTime(0.25 * volume, now + idx * 0.15 + 0.05);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.15 + 1.5);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + idx * 0.15);
+          osc.stop(now + idx * 0.15 + 1.7);
+        });
+      }
+      playTaskSuccessSound(volume = 0.8) {
+        const ctx = this.getAudioContext();
+        if (!ctx) return;
+        const notes = [587.33, 880, 1174.66];
+        const now = ctx.currentTime;
+        notes.forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+          gain.gain.setValueAtTime(0, now + idx * 0.08);
+          gain.gain.linearRampToValueAtTime(0.25 * volume, now + idx * 0.08 + 0.03);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.08 + 0.8);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + idx * 0.08);
+          osc.stop(now + idx * 0.08 + 0.9);
+        });
+      }
+      playTapSound(volume = 0.5) {
+        const ctx = this.getAudioContext();
+        if (!ctx) return;
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(800, now);
+        osc.frequency.exponentialRampToValueAtTime(300, now + 0.05);
+        gain.gain.setValueAtTime(0.15 * volume, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.06);
+      }
+    }
+    const soundManager = new SoundEffects();
+
+    // --- Storage Keys & Initial Data ---
+    const STORAGE_KEYS = {
+      TASKS: 'focusflow_tasks_v1',
+      POMO_SESSIONS: 'focusflow_pomo_sessions_v1',
+      SETTINGS: 'focusflow_settings_v1',
+      THEME: 'focusflow_theme_v1',
+    };
+
+    const DEFAULT_TASKS = [
+      {
+        id: 'task-1',
+        title: 'Hoàn thiện đồ án Web Quản Lý Thời Gian',
+        description: 'Xây dựng giao diện ReactJS, tính năng Pomodoro thông minh, tích hợp âm thanh chuông báo và bảng phân tích năng suất.',
+        category: 'Học tập',
+        priority: 'high',
+        status: 'in_progress',
+        deadline: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
+        estimatedPomos: 4,
+        completedPomos: 2,
+        createdAt: new Date(Date.now() - 3600 * 1000 * 5).toISOString(),
+        completedAt: null,
+      },
+      {
+        id: 'task-2',
+        title: 'Nghiên cứu kiến trúc TailwindCSS & Dark Mode',
+        description: 'Tối ưu bảng màu HSL, hiệu ứng Glassmorphism và tối ưu trải nghiệm kéo thả Kanban.',
+        category: 'Công việc',
+        priority: 'medium',
+        status: 'todo',
+        deadline: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString().slice(0, 16),
+        estimatedPomos: 2,
+        completedPomos: 0,
+        createdAt: new Date(Date.now() - 3600 * 1000 * 10).toISOString(),
+        completedAt: null,
+      },
+      {
+        id: 'task-3',
+        title: 'Đọc 30 trang sách "Deep Work" của Cal Newport',
+        description: 'Ghi chép các phương pháp tập trung sâu và áp dụng chu kỳ Pomodoro vào lịch trình.',
+        category: 'Cá nhân',
+        priority: 'low',
+        status: 'done',
+        deadline: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString().slice(0, 16),
+        estimatedPomos: 1,
+        completedPomos: 1,
+        createdAt: new Date(Date.now() - 3600 * 1000 * 24).toISOString(),
+        completedAt: new Date(Date.now() - 3600 * 1000 * 4).toISOString(),
+      },
+      {
+        id: 'task-4',
+        title: 'Luyện tập thể dục buổi chiều 45 phút',
+        description: 'Chạy bộ và thư giãn cơ bắp giúp tái tạo năng lượng cho buổi tối.',
+        category: 'Cá nhân',
+        priority: 'medium',
+        status: 'todo',
+        deadline: new Date(Date.now() + 10 * 60 * 60 * 1000).toISOString().slice(0, 16),
+        estimatedPomos: 2,
+        completedPomos: 0,
+        createdAt: new Date(Date.now() - 3600 * 1000 * 8).toISOString(),
+        completedAt: null,
+      }
+    ];
+
+    const DEFAULT_SETTINGS = {
+      focusDuration: 25,
+      shortBreakDuration: 5,
+      longBreakDuration: 15,
+      longBreakInterval: 4,
+      dailyGoalPomos: 8,
+      dailyGoalHours: 4,
+      autoStartBreaks: true,
+      autoStartPomos: false,
+      soundEnabled: true,
+      soundVolume: 0.8,
+    };
+
+    const generateInitialPomoSessions = () => {
+      const sessions = [];
+      const now = new Date();
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(now.getDate() - i);
+        const dateStr = d.toISOString().split('T')[0];
+        const count = i === 0 ? 3 : Math.floor(Math.random() * 4) + 3;
+        for (let j = 0; j < count; j++) {
+          sessions.push({
+            id: `pomo-${dateStr}-${j}`,
+            date: dateStr,
+            durationMinutes: 25,
+            type: 'focus',
+            taskId: j % 2 === 0 ? 'task-1' : 'task-2',
+            taskTitle: j % 2 === 0 ? 'Hoàn thiện đồ án Web Quản Lý Thời Gian' : 'Nghiên cứu kiến trúc TailwindCSS',
+            category: j % 2 === 0 ? 'Học tập' : 'Công việc',
+            completedAt: new Date(d.getTime() + j * 45 * 60 * 1000).toISOString(),
+          });
+        }
+      }
+      return sessions;
+    };
+
+    const getStored = (key, fallback) => {
+      try {
+        const item = localStorage.getItem(key);
+        return item ? JSON.parse(item) : fallback;
+      } catch (e) {
+        return fallback;
+      }
+    };
+
+    const setStored = (key, value) => {
+      try {
+        localStorage.setItem(key, JSON.stringify(value));
+      } catch (e) {}
+    };
+
+    // --- MAIN APP COMPONENT ---
+    function App() {
+      // Theme state
+      const [isDark, setIsDark] = useState(() => getStored(STORAGE_KEYS.THEME, 'dark') === 'dark');
+      
+      useEffect(() => {
+        const root = document.documentElement;
+        if (isDark) root.classList.add('dark');
+        else root.classList.remove('dark');
+        setStored(STORAGE_KEYS.THEME, isDark ? 'dark' : 'light');
+      }, [isDark]);
+
+      // Navigation: 'dashboard' | 'tasks' | 'pomodoro'
+      const [activeTab, setActiveTab] = useState('dashboard');
+
+      // Global Data
+      const [tasks, setTasks] = useState(() => getStored(STORAGE_KEYS.TASKS, DEFAULT_TASKS));
+      const [pomoSessions, setPomoSessions] = useState(() => getStored(STORAGE_KEYS.POMO_SESSIONS, generateInitialPomoSessions()));
+      const [settings, setSettings] = useState(() => getStored(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS));
+      const [activeTaskId, setActiveTaskId] = useState(() => tasks.find(t => t.status === 'in_progress')?.id || tasks[0]?.id || null);
+      
+      // Toast notification state
+      const [toast, setToast] = useState(null);
+      const showToast = (message, type = 'success') => {
+        setToast({ message, type, id: Date.now() });
+        setTimeout(() => setToast(current => current && current.id <= Date.now() - 3000 ? null : current), 3000);
+      };
+
+      // Modals
+      const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+      const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
+      const [taskToEdit, setTaskToEdit] = useState(null);
+      const [defaultStatusForNew, setDefaultStatusForNew] = useState('todo');
+
+      // Persist data
+      useEffect(() => setStored(STORAGE_KEYS.TASKS, tasks), [tasks]);
+      useEffect(() => setStored(STORAGE_KEYS.POMO_SESSIONS, pomoSessions), [pomoSessions]);
+      useEffect(() => setStored(STORAGE_KEYS.SETTINGS, settings), [settings]);
+
+      // Active task computed
+      const activeTask = useMemo(() => tasks.find(t => t.id === activeTaskId) || null, [tasks, activeTaskId]);
+
+      // Task actions
+      const addTask = (taskData) => {
+        const newTask = {
+          id: `task-${Date.now()}`,
+          title: taskData.title.trim(),
+          description: taskData.description?.trim() || '',
+          category: taskData.category || 'Công việc',
+          priority: taskData.priority || 'medium',
+          status: taskData.status || 'todo',
+          deadline: taskData.deadline || '',
+          estimatedPomos: Number(taskData.estimatedPomos) || 1,
+          completedPomos: 0,
+          createdAt: new Date().toISOString(),
+          completedAt: null,
+        };
+        setTasks(prev => [newTask, ...prev]);
+        showToast(`Đã thêm công việc: "${newTask.title}"`, 'success');
+      };
+
+      const updateTask = (id, fields) => {
+        setTasks(prev => prev.map(t => {
+          if (t.id === id) {
+            const isNowDone = fields.status === 'done' && t.status !== 'done';
+            return {
+              ...t,
+              ...fields,
+              completedAt: isNowDone ? new Date().toISOString() : (fields.status && fields.status !== 'done' ? null : t.completedAt)
+            };
+          }
+          return t;
+        }));
+        showToast('Đã cập nhật công việc thành công!', 'info');
+      };
+
+      const deleteTask = (id) => {
+        const t = tasks.find(item => item.id === id);
+        setTasks(prev => prev.filter(item => item.id !== id));
+        if (activeTaskId === id) setActiveTaskId(null);
+        showToast(`Đã xóa "${t?.title || ''}"`, 'warning');
+      };
+
+      const moveTaskStatus = (id, newStatus) => {
+        setTasks(prev => prev.map(t => {
+          if (t.id === id) {
+            const isDone = newStatus === 'done' && t.status !== 'done';
+            if (isDone) {
+              try {
+                if (window.confetti) {
+                  window.confetti({ particleCount: 80, spread: 60, origin: { y: 0.7 } });
+                }
+                if (settings.soundEnabled) soundManager.playTaskSuccessSound(settings.soundVolume);
+              } catch(e){}
+            }
+            return {
+              ...t,
+              status: newStatus,
+              completedAt: newStatus === 'done' ? new Date().toISOString() : null,
+            };
+          }
+          return t;
+        }));
+      };
+
+      const linkTaskToPomodoro = (task) => {
+        setActiveTaskId(task.id);
+        setActiveTab('pomodoro');
+        showToast(`Đã chọn "${task.title}" cho phiên Pomodoro`, 'info');
+      };
+
+      // Pomodoro complete handler
+      const recordCompletedPomodoro = () => {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const durationMins = settings.focusDuration || 25;
+
+        if (activeTaskId) {
+          setTasks(prev => prev.map(t => {
+            if (t.id === activeTaskId) {
+              return {
+                ...t,
+                completedPomos: (t.completedPomos || 0) + 1,
+                status: t.status === 'todo' ? 'in_progress' : t.status
+              };
+            }
+            return t;
+          }));
+        }
+
+        const newSession = {
+          id: `pomo-${Date.now()}`,
+          date: todayStr,
+          durationMinutes: durationMins,
+          type: 'focus',
+          taskId: activeTaskId || null,
+          taskTitle: activeTask?.title || 'Tập trung tự do',
+          category: activeTask?.category || 'Chung',
+          completedAt: new Date().toISOString(),
+        };
+
+        setPomoSessions(prev => [newSession, ...prev]);
+        showToast(`Tuyệt vời! Bạn vừa hoàn thành 1 phiên Focus (${durationMins}p)`, 'success');
+        try {
+          if (window.confetti) {
+            window.confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+          }
+        } catch(e){}
+      };
+
+      // Analytics calculations
+      const todayStr = new Date().toISOString().split('T')[0];
+      const todaySessions = useMemo(() => pomoSessions.filter(s => s.date === todayStr && s.type === 'focus'), [pomoSessions, todayStr]);
+      const todayFocusMinutes = useMemo(() => todaySessions.reduce((acc, s) => acc + (s.durationMinutes || 0), 0), [todaySessions]);
+      const todayCompletedTasks = useMemo(() => tasks.filter(t => t.status === 'done' && t.completedAt && t.completedAt.startsWith(todayStr)).length, [tasks, todayStr]);
+      const totalCompletedTasks = useMemo(() => tasks.filter(t => t.status === 'done').length, [tasks]);
+      
+      const streakDays = useMemo(() => {
+        let streak = 0;
+        const now = new Date();
+        for (let i = 0; i < 30; i++) {
+          const d = new Date();
+          d.setDate(now.getDate() - i);
+          const dateStr = d.toISOString().split('T')[0];
+          const hasFocus = pomoSessions.some(s => s.date === dateStr && s.type === 'focus');
+          if (hasFocus) streak++;
+          else if (i > 0) break;
+        }
+        return Math.max(streak, 1);
+      }, [pomoSessions]);
+
+      // JSON Export/Import
+      const exportData = () => {
+        const backup = { version: '1.0', exportDate: new Date().toISOString(), tasks, pomoSessions, settings };
+        const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `focusflow-backup-${todayStr}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        showToast('Đã xuất dữ liệu sao lưu thành công!', 'success');
+      };
+
+      const importData = (jsonData) => {
+        try {
+          if (jsonData.tasks) setTasks(jsonData.tasks);
+          if (jsonData.pomoSessions) setPomoSessions(jsonData.pomoSessions);
+          if (jsonData.settings) setSettings(jsonData.settings);
+          showToast('Đã khôi phục dữ liệu thành công!', 'success');
+          return true;
+        } catch(e) {
+          showToast('Lỗi khi đọc file dữ liệu!', 'error');
+          return false;
+        }
+      };
+
+      return (
+        <div className="min-h-screen relative flex flex-col transition-colors duration-300">
+          {/* Ambient Glow */}
+          <div className="ambient-glow top-0 left-1/4 w-96 h-96 bg-indigo-500" />
+          <div className="ambient-glow top-1/3 right-10 w-80 h-80 bg-purple-500" />
+          <div className="ambient-glow bottom-10 left-10 w-80 h-80 bg-emerald-500" />
+
+          {/* Top Navbar */}
+          <header className="sticky top-0 z-40 w-full glass-nav">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex items-center justify-between h-16">
+                
+                {/* Logo */}
+                <div onClick={() => setActiveTab('dashboard')} className="flex items-center gap-3 cursor-pointer group select-none">
+                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-500 flex items-center justify-center shadow-lg shadow-indigo-500/25 group-hover:scale-105 transition-transform text-white font-bold text-lg">
+                    ⏱️
+                  </div>
+                  <div>
+                    <span className="text-lg font-extrabold bg-gradient-to-r from-indigo-500 to-purple-500 bg-clip-text text-transparent">
+                      FocusFlow
+                    </span>
+                    <span className="hidden sm:inline-block ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+                      PRO
+                    </span>
+                  </div>
+                </div>
+
+                {/* Navigation Tabs */}
+                <nav className="hidden md:flex items-center gap-1 bg-slate-200/60 dark:bg-slate-900/60 p-1.5 rounded-2xl border border-slate-300/50 dark:border-slate-800/80 backdrop-blur-md">
+                  {[
+                    { id: 'dashboard', label: 'Bảng Điều Khiển', icon: '📊' },
+                    { id: 'tasks', label: 'Công Việc & Kanban', icon: '📋' },
+                    { id: 'pomodoro', label: 'Đồng Hồ Pomodoro', icon: '⏱️' },
+                  ].map((item) => {
+                    const isActive = activeTab === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => setActiveTab(item.id)}
+                        className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all duration-200 ${
+                          isActive
+                            ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-md'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-white/40 dark:hover:bg-slate-800/40'
+                        }`}
+                      >
+                        <span>{item.icon}</span>
+                        <span>{item.label}</span>
+                      </button>
+                    );
+                  })}
+                </nav>
+
+                {/* Right actions */}
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div title={`Chuỗi ${streakDays} ngày tập trung liên tục`} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold select-none cursor-default">
+                    <span>🔥</span>
+                    <span>{streakDays} ngày</span>
+                  </div>
+
+                  <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-xs font-bold select-none">
+                    <span>✨</span>
+                    <span>{(todayFocusMinutes / 60).toFixed(1)}h hôm nay</span>
+                  </div>
+
+                  {/* Dark/Light Toggle */}
+                  <button
+                    onClick={() => setIsDark(!isDark)}
+                    title={isDark ? 'Chuyển sang giao diện Sáng' : 'Chuyển sang giao diện Tối'}
+                    className="p-2.5 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/80 border border-transparent hover:border-slate-200 dark:hover:border-slate-700 transition text-base"
+                  >
+                    {isDark ? '☀️' : '🌙'}
+                  </button>
+
+                  {/* Settings trigger */}
+                  <button
+                    onClick={() => setIsSettingsOpen(true)}
+                    title="Cài đặt hệ thống"
+                    className="p-2.5 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/80 border border-transparent hover:border-slate-200 dark:hover:border-slate-700 transition text-base"
+                  >
+                    ⚙️
+                  </button>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          {/* Main View Container */}
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-24 md:pb-12 relative z-10">
+            {activeTab === 'dashboard' && (
+              <DashboardView
+                todayFocusMinutes={todayFocusMinutes}
+                todayCompletedTasks={todayCompletedTasks}
+                totalCompletedTasks={totalCompletedTasks}
+                todayPomoCount={todaySessions.length}
+                streakDays={streakDays}
+                tasks={tasks}
+                pomoSessions={pomoSessions}
+                settings={settings}
+                setActiveTab={setActiveTab}
+                linkTaskToPomodoro={linkTaskToPomodoro}
+                moveTaskStatus={moveTaskStatus}
+                isDark={isDark}
+              />
+            )}
+
+            {activeTab === 'tasks' && (
+              <TaskView
+                tasks={tasks}
+                onEditTask={(t) => { setTaskToEdit(t); setIsTaskModalOpen(true); }}
+                onAddNew={(status = 'todo') => { setTaskToEdit(null); setDefaultStatusForNew(status); setIsTaskModalOpen(true); }}
+                moveTaskStatus={moveTaskStatus}
+                deleteTask={deleteTask}
+                linkTaskToPomodoro={linkTaskToPomodoro}
+                activeTaskId={activeTaskId}
+              />
+            )}
+
+            {activeTab === 'pomodoro' && (
+              <PomodoroView
+                settings={settings}
+                activeTask={activeTask}
+                activeTaskId={activeTaskId}
+                setActiveTaskId={setActiveTaskId}
+                tasks={tasks}
+                recordCompletedPomodoro={recordCompletedPomodoro}
+                pomoSessions={pomoSessions}
+                todayFocusMinutes={todayFocusMinutes}
+                todayPomoCount={todaySessions.length}
+                showToast={showToast}
+              />
+            )}
+          </main>
+
+          {/* Mobile Bottom Navigation */}
+          <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-t border-slate-200 dark:border-slate-800 px-4 py-2 flex justify-around items-center">
+            {[
+              { id: 'dashboard', label: 'Tổng quan', icon: '📊' },
+              { id: 'tasks', label: 'Công việc', icon: '📋' },
+              { id: 'pomodoro', label: 'Pomodoro', icon: '⏱️' },
+            ].map((item) => {
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id)}
+                  className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition ${
+                    isActive ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-400 font-medium'
+                  }`}
+                >
+                  <span className="text-lg">{item.icon}</span>
+                  <span className="text-[11px]">{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* Toast Container */}
+          {toast && (
+            <div className="fixed bottom-20 sm:bottom-6 right-6 z-50 animate-fade-in">
+              <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-indigo-500/30 bg-slate-900/95 text-slate-100 shadow-xl backdrop-blur-md text-sm font-medium">
+                <span>{toast.type === 'success' ? '✅' : toast.type === 'warning' ? '⚠️' : 'ℹ️'}</span>
+                <p>{toast.message}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Task Modal */}
+          {isTaskModalOpen && (
+            <TaskModal
+              isOpen={isTaskModalOpen}
+              onClose={() => setIsTaskModalOpen(false)}
+              taskToEdit={taskToEdit}
+              defaultStatus={defaultStatusForNew}
+              onSave={(formData) => {
+                if (taskToEdit) updateTask(taskToEdit.id, formData);
+                else addTask(formData);
+                setIsTaskModalOpen(false);
+              }}
+            />
+          )}
+
+          {/* Settings Modal */}
+          {isSettingsOpen && (
+            <SettingsModal
+              isOpen={isSettingsOpen}
+              onClose={() => setIsSettingsOpen(false)}
+              settings={settings}
+              onSave={(newSettings) => {
+                setSettings(newSettings);
+                setIsSettingsOpen(false);
+                showToast('Đã lưu cài đặt hệ thống!', 'success');
+              }}
+              onExport={exportData}
+              onImport={importData}
+              onReset={() => {
+                setTasks(DEFAULT_TASKS);
+                setPomoSessions(generateInitialPomoSessions());
+                setSettings(DEFAULT_SETTINGS);
+                showToast('Đã đặt lại dữ liệu mặc định!', 'info');
+                setIsSettingsOpen(false);
+              }}
+              showToast={showToast}
+            />
+          )}
+        </div>
+      );
+    }
+
+    // --- DASHBOARD VIEW ---
+    function DashboardView({
+      todayFocusMinutes,
+      todayCompletedTasks,
+      totalCompletedTasks,
+      todayPomoCount,
+      streakDays,
+      tasks,
+      pomoSessions,
+      settings,
+      setActiveTab,
+      linkTaskToPomodoro,
+      moveTaskStatus,
+      isDark
+    }) {
+      const hours = (todayFocusMinutes / 60).toFixed(1);
+      const targetPomos = settings.dailyGoalPomos || 8;
+      const goalProgress = Math.min(100, Math.round((todayPomoCount / targetPomos) * 100));
+
+      const urgentTask = useMemo(() => {
+        return (
+          tasks.find(t => t.status === 'in_progress' && t.priority === 'high') ||
+          tasks.find(t => t.status === 'in_progress') ||
+          tasks.find(t => t.status === 'todo' && t.priority === 'high') ||
+          tasks.find(t => t.status === 'todo') ||
+          null
+        );
+      }, [tasks]);
+
+      // Setup Chart.js canvas references
+      const barCanvasRef = useRef(null);
+      const doughnutCanvasRef = useRef(null);
+
+      useEffect(() => {
+        let barChartInstance = null;
+        let doughnutChartInstance = null;
+
+        // 7-day bar chart
+        if (barCanvasRef.current) {
+          const days = [];
+          const points = [];
+          const dayNames = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+
+          for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            const dateStr = d.toISOString().split('T')[0];
+            const dayName = dayNames[d.getDay()];
+
+            const totalMins = pomoSessions
+              .filter(s => s.date === dateStr && s.type === 'focus')
+              .reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+
+            days.push(`${dayName} (${d.getDate()}/${d.getMonth() + 1})`);
+            points.push(totalMins);
+          }
+
+          const textColor = isDark ? '#94A3B8' : '#64748B';
+          const gridColor = isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.05)';
+
+          barChartInstance = new Chart(barCanvasRef.current, {
+            type: 'bar',
+            data: {
+              labels: days,
+              datasets: [{
+                label: 'Phút tập trung',
+                data: points,
+                backgroundColor: isDark ? 'rgba(99, 102, 241, 0.85)' : 'rgba(79, 70, 229, 0.85)',
+                borderRadius: 8,
+                hoverBackgroundColor: '#818CF8',
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { grid: { display: false }, ticks: { color: textColor } },
+                y: { beginAtZero: true, grid: { color: gridColor }, ticks: { color: textColor } }
+              }
+            }
+          });
+        }
+
+        // Category Doughnut Chart
+        if (doughnutCanvasRef.current) {
+          const counts = { 'Học tập': 0, 'Công việc': 0, 'Cá nhân': 0 };
+          tasks.forEach(t => {
+            const cat = t.category || 'Công việc';
+            counts[cat] = (counts[cat] || 0) + 1;
+          });
+
+          doughnutChartInstance = new Chart(doughnutCanvasRef.current, {
+            type: 'doughnut',
+            data: {
+              labels: Object.keys(counts),
+              datasets: [{
+                data: Object.values(counts),
+                backgroundColor: ['#6366F1', '#0EA5E9', '#10B981'],
+                borderWidth: 2,
+                borderColor: isDark ? '#111827' : '#FFFFFF',
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: {
+                  position: 'bottom',
+                  labels: { color: isDark ? '#94A3B8' : '#64748B', boxWidth: 12, padding: 12 }
+                }
+              },
+              cutout: '70%'
+            }
+          });
+        }
+
+        return () => {
+          if (barChartInstance) barChartInstance.destroy();
+          if (doughnutChartInstance) doughnutChartInstance.destroy();
+        };
+      }, [pomoSessions, tasks, isDark]);
+
+      return (
+        <div className="space-y-8 animate-fade-in pb-12">
+          {/* Welcome Banner */}
+          <div className="relative overflow-hidden rounded-3xl p-6 sm:p-8 bg-gradient-to-r from-indigo-600 via-indigo-600 to-purple-600 text-white shadow-2xl shadow-indigo-500/20">
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div className="max-w-xl">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 backdrop-blur-md text-xs font-semibold mb-3 border border-white/20">
+                  <span>✨</span>
+                  <span>Chào mừng bạn đến với FocusFlow</span>
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+                  Làm chủ thời gian, tối đa hóa năng suất
+                </h1>
+                <p className="mt-2 text-sm text-indigo-100/90 leading-relaxed">
+                  Bạn đã hoàn thành <strong className="text-white font-bold">{todayPomoCount}</strong> phiên Pomodoro hôm nay. Tiếp tục duy trì chuỗi <strong className="text-amber-300 font-bold">{streakDays} ngày</strong> bứt phá nhé!
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 shrink-0">
+                <button
+                  onClick={() => setActiveTab('pomodoro')}
+                  className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-white text-indigo-700 font-bold text-sm shadow-lg hover:bg-indigo-50 active:scale-95 transition-all"
+                >
+                  <span>▶ Bật Pomodoro Ngay</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('tasks')}
+                  className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-white/15 hover:bg-white/25 border border-white/20 text-white font-semibold text-sm backdrop-blur-md transition-all"
+                >
+                  <span>📋 Xem Bảng Việc</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Daily Goal Bar */}
+            <div className="mt-6 pt-5 border-t border-white/15">
+              <div className="flex items-center justify-between text-xs font-bold mb-2">
+                <span>Tiến độ mục tiêu hàng ngày: {todayPomoCount} / {targetPomos} Pomodoro</span>
+                <span>{goalProgress}%</span>
+              </div>
+              <div className="w-full h-2.5 bg-black/20 rounded-full overflow-hidden p-0.5">
+                <div 
+                  className="h-full bg-gradient-to-r from-amber-300 to-emerald-300 rounded-full transition-all duration-500 ease-out"
+                  style={{ width: `${goalProgress}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 4 Stat Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+            <div className="glass-card rounded-2xl p-5 border border-emerald-500/20">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Việc Đã Xong Hôm Nay</p>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="text-3xl font-extrabold">{todayCompletedTasks}</span>
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                      +{todayCompletedTasks}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">Tổng toàn bộ: {totalCompletedTasks} việc</p>
+                </div>
+                <div className="p-3 rounded-2xl bg-emerald-500/10 text-emerald-500 text-2xl">✅</div>
+              </div>
+            </div>
+
+            <div className="glass-card rounded-2xl p-5 border border-indigo-500/20">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Thời Gian Tập Trung</p>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="text-3xl font-extrabold">{hours}h</span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">{todayFocusMinutes} phút tập trung sâu</p>
+                </div>
+                <div className="p-3 rounded-2xl bg-indigo-500/10 text-indigo-500 text-2xl">⏳</div>
+              </div>
+            </div>
+
+            <div className="glass-card rounded-2xl p-5 border border-purple-500/20">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Phiên Pomodoro</p>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="text-3xl font-extrabold">{todayPomoCount}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">Mục tiêu: {targetPomos} phiên/ngày</p>
+                </div>
+                <div className="p-3 rounded-2xl bg-purple-500/10 text-purple-500 text-2xl">🍅</div>
+              </div>
+            </div>
+
+            <div className="glass-card rounded-2xl p-5 border border-amber-500/20">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Chuỗi Kỷ Lục</p>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="text-3xl font-extrabold">{streakDays} ngày</span>
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                      Đang cháy!
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">Giữ vững phong độ</p>
+                </div>
+                <div className="p-3 rounded-2xl bg-amber-500/10 text-amber-500 text-2xl">🔥</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Charts Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 glass-card rounded-2xl p-6 border border-slate-200 dark:border-slate-800">
+              <h3 className="font-bold text-base mb-1">Xu Hướng Năng Suất 7 Ngày</h3>
+              <p className="text-xs text-slate-500 mb-4">Tổng số phút tập trung mỗi ngày qua Pomodoro</p>
+              <div className="h-64 sm:h-72 w-full">
+                <canvas ref={barCanvasRef}></canvas>
+              </div>
+            </div>
+
+            <div className="glass-card rounded-2xl p-6 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+              <div>
+                <h3 className="font-bold text-base mb-1">Phân Bổ Danh Mục</h3>
+                <p className="text-xs text-slate-500 mb-4">Tỷ lệ công việc theo chủ đề</p>
+              </div>
+              <div className="h-56 w-full flex items-center justify-center">
+                <canvas ref={doughnutCanvasRef}></canvas>
+              </div>
+            </div>
+          </div>
+
+          {/* Urgent Task & Recent List */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Urgent Card */}
+            <div className="glass-card rounded-2xl p-6 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <span className="text-xs font-bold uppercase tracking-wider text-rose-500 flex items-center gap-1">
+                    ⚡ Cần tập trung ngay
+                  </span>
+                  {urgentTask && (
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                      urgentTask.priority === 'high' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' : 'bg-amber-500/10 text-amber-600'
+                    }`}>
+                      {urgentTask.priority === 'high' ? 'Ưu tiên Cao' : 'Ưu tiên Vừa'}
+                    </span>
+                  )}
+                </div>
+
+                {urgentTask ? (
+                  <div className="space-y-3">
+                    <h3 className="font-bold text-lg">{urgentTask.title}</h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                      {urgentTask.description || 'Chưa có mô tả chi tiết.'}
+                    </p>
+                    <div className="flex items-center gap-3 text-xs text-slate-500 pt-2">
+                      <span className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 font-medium">
+                        {urgentTask.category}
+                      </span>
+                      <span>🍅 {urgentTask.completedPomos || 0}/{urgentTask.estimatedPomos || 1} Pomos</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-8 text-center text-slate-400">
+                    <p className="font-semibold text-sm">🎉 Bạn đã hoàn thành hết công việc!</p>
+                  </div>
+                )}
+              </div>
+
+              {urgentTask && (
+                <div className="pt-6 mt-4 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    onClick={() => linkTaskToPomodoro(urgentTask)}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-md transition"
+                  >
+                    <span>▶ Bắt đầu phiên cho việc này</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Recent Tasks */}
+            <div className="lg:col-span-2 glass-card rounded-2xl p-6 border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold text-base">Danh Sách Công Việc Gần Đây</h3>
+                <button onClick={() => setActiveTab('tasks')} className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">
+                  Xem tất cả →
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {tasks.slice(0, 4).map(task => {
+                  const isDone = task.status === 'done';
+                  return (
+                    <div key={task.id} className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 transition">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <button
+                          onClick={() => moveTaskStatus(task.id, isDone ? 'todo' : 'done')}
+                          className={`w-5 h-5 rounded-lg border flex items-center justify-center text-xs transition ${
+                            isDone ? 'bg-emerald-500 border-emerald-500 text-white font-bold' : 'border-slate-300 dark:border-slate-600'
+                          }`}
+                        >
+                          {isDone && '✓'}
+                        </button>
+                        <div className="min-w-0">
+                          <p className={`text-sm font-semibold truncate ${isDone ? 'line-through text-slate-400' : ''}`}>
+                            {task.title}
+                          </p>
+                          <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                            <span className="font-medium text-indigo-600 dark:text-indigo-400">{task.category}</span>
+                            <span>•</span>
+                            <span>🍅 {task.completedPomos || 0}/{task.estimatedPomos || 1}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase ${
+                          task.priority === 'high' ? 'bg-rose-500/10 text-rose-600' : task.priority === 'medium' ? 'bg-amber-500/10 text-amber-600' : 'bg-emerald-500/10 text-emerald-600'
+                        }`}>
+                          {task.priority === 'high' ? 'Cao' : task.priority === 'medium' ? 'Vừa' : 'Thấp'}
+                        </span>
+                        {!isDone && (
+                          <button
+                            onClick={() => linkTaskToPomodoro(task)}
+                            title="Tập trung vào việc này"
+                            className="px-2.5 py-1 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-xs font-bold transition"
+                          >
+                            ▶
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- TASK & KANBAN VIEW ---
+    function TaskView({
+      tasks,
+      onEditTask,
+      onAddNew,
+      moveTaskStatus,
+      deleteTask,
+      linkTaskToPomodoro,
+      activeTaskId
+    }) {
+      const [searchQuery, setSearchQuery] = useState('');
+      const [selectedCategory, setSelectedCategory] = useState('all');
+      const [selectedPriority, setSelectedPriority] = useState('all');
+      const [viewMode, setViewMode] = useState('kanban'); // 'kanban' | 'list'
+      const [draggedTaskId, setDraggedTaskId] = useState(null);
+
+      const categories = useMemo(() => {
+        const set = new Set(['Công việc', 'Học tập', 'Cá nhân']);
+        tasks.forEach(t => { if (t.category) set.add(t.category); });
+        return Array.from(set);
+      }, [tasks]);
+
+      const filteredTasks = useMemo(() => {
+        return tasks.filter(t => {
+          const matchQuery = searchQuery.trim() === '' ||
+            t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (t.description && t.description.toLowerCase().includes(searchQuery.toLowerCase()));
+          const matchCat = selectedCategory === 'all' || t.category === selectedCategory;
+          const matchPriority = selectedPriority === 'all' || t.priority === selectedPriority;
+          return matchQuery && matchCat && matchPriority;
+        });
+      }, [tasks, searchQuery, selectedCategory, selectedPriority]);
+
+      const columns = [
+        { id: 'todo', title: 'Cần Làm', color: 'border-indigo-500/40 text-indigo-500 bg-indigo-500/10', icon: '📝' },
+        { id: 'in_progress', title: 'Đang Làm', color: 'border-amber-500/40 text-amber-500 bg-amber-500/10', icon: '⚡' },
+        { id: 'done', title: 'Hoàn Thành', color: 'border-emerald-500/40 text-emerald-500 bg-emerald-500/10', icon: '✅' },
+      ];
+
+      const handleDragStart = (e, id) => {
+        setDraggedTaskId(id);
+        e.dataTransfer.setData('text/plain', id);
+      };
+
+      const handleDrop = (e, colId) => {
+        e.preventDefault();
+        const taskId = e.dataTransfer.getData('text/plain') || draggedTaskId;
+        if (taskId) {
+          moveTaskStatus(taskId, colId);
+          setDraggedTaskId(null);
+        }
+      };
+
+      return (
+        <div className="space-y-6 animate-fade-in pb-12">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight flex items-center gap-2">
+                <span>📋 Quản Lý Công Việc</span>
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                Tổng cộng: <strong className="text-indigo-600 dark:text-indigo-400 font-bold">{tasks.length}</strong> công việc ({tasks.filter(t => t.status === 'done').length} đã hoàn thành)
+              </p>
+            </div>
+
+            <button
+              onClick={() => onAddNew('todo')}
+              className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-lg shadow-indigo-500/25 active:scale-95 transition-all self-start sm:self-auto"
+            >
+              <span>+ Thêm Công Việc Mới</span>
+            </button>
+          </div>
+
+          {/* Filters Bar */}
+          <div className="glass-card rounded-2xl p-4 sm:p-5 border border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="relative flex-1 max-w-md">
+                <input
+                  type="text"
+                  placeholder="🔍 Tìm kiếm công việc theo tên..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="w-full px-4 py-2.5 text-xs sm:text-sm rounded-xl bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
+                />
+              </div>
+
+              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-900/80 p-1 rounded-xl border border-slate-200 dark:border-slate-800 self-start sm:self-auto">
+                <button
+                  onClick={() => setViewMode('kanban')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                    viewMode === 'kanban' ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500'
+                  }`}
+                >
+                  Bảng Kanban
+                </button>
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                    viewMode === 'list' ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500'
+                  }`}
+                >
+                  Danh Sách
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs font-semibold text-slate-400 mr-1">Danh mục:</span>
+                {['all', ...categories].map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                      selectedCategory === cat ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    {cat === 'all' ? 'Tất cả' : cat}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-400">Ưu tiên:</span>
+                <select
+                  value={selectedPriority}
+                  onChange={e => setSelectedPriority(e.target.value)}
+                  className="px-2.5 py-1 text-xs rounded-lg bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-bold focus:outline-none"
+                >
+                  <option value="all">Tất cả mức độ</option>
+                  <option value="high">Ưu tiên Cao</option>
+                  <option value="medium">Ưu tiên Trung bình</option>
+                  <option value="low">Ưu tiên Thấp</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Kanban or List */}
+          {viewMode === 'kanban' ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+              {columns.map(col => {
+                const colTasks = filteredTasks.filter(t => t.status === col.id);
+                return (
+                  <div
+                    key={col.id}
+                    onDragOver={e => e.preventDefault()}
+                    onDrop={e => handleDrop(e, col.id)}
+                    className="flex flex-col rounded-3xl p-4 sm:p-5 min-h-[500px] bg-slate-100/70 dark:bg-slate-900/40 border border-slate-200/80 dark:border-slate-800/80"
+                  >
+                    <div className="flex items-center justify-between pb-3.5 mb-3 border-b border-slate-200/80 dark:border-slate-800">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">{col.icon}</span>
+                        <h3 className="text-sm font-extrabold flex items-center gap-2">
+                          <span>{col.title}</span>
+                          <span className="text-[11px] px-2 py-0.5 rounded-full font-bold bg-slate-200 dark:bg-slate-800">
+                            {colTasks.length}
+                          </span>
+                        </h3>
+                      </div>
+                      <button
+                        onClick={() => onAddNew(col.id)}
+                        className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500"
+                      >
+                        +
+                      </button>
+                    </div>
+
+                    <div className="flex-1 space-y-3.5 overflow-y-auto">
+                      {colTasks.map(task => (
+                        <TaskCardItem
+                          key={task.id}
+                          task={task}
+                          onEdit={onEditTask}
+                          onDragStart={handleDragStart}
+                          moveTaskStatus={moveTaskStatus}
+                          deleteTask={deleteTask}
+                          linkTaskToPomodoro={linkTaskToPomodoro}
+                          isActive={activeTaskId === task.id}
+                        />
+                      ))}
+                      {colTasks.length === 0 && (
+                        <div className="h-32 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl text-xs text-slate-400">
+                          Kéo thả việc vào đây
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredTasks.map(task => (
+                <TaskCardItem
+                  key={task.id}
+                  task={task}
+                  onEdit={onEditTask}
+                  onDragStart={handleDragStart}
+                  moveTaskStatus={moveTaskStatus}
+                  deleteTask={deleteTask}
+                  linkTaskToPomodoro={linkTaskToPomodoro}
+                  isActive={activeTaskId === task.id}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Single Task Card Item
+    function TaskCardItem({
+      task,
+      onEdit,
+      onDragStart,
+      moveTaskStatus,
+      deleteTask,
+      linkTaskToPomodoro,
+      isActive
+    }) {
+      const isDone = task.status === 'done';
+      const isHigh = task.priority === 'high';
+      const isMed = task.priority === 'medium';
+
+      return (
+        <div
+          draggable
+          onDragStart={e => onDragStart(e, task.id)}
+          className={`group relative glass-card rounded-2xl p-4 border transition-all duration-200 cursor-grab active:cursor-grabbing hover:shadow-lg ${
+            isActive ? 'border-indigo-500 ring-2 ring-indigo-500/30 bg-indigo-500/5' : isDone ? 'opacity-80 border-slate-200 dark:border-slate-800' : 'border-slate-200 dark:border-slate-800 hover:border-indigo-500/50'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2 mb-2.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                {task.category}
+              </span>
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border ${
+                isHigh ? 'bg-rose-500/10 text-rose-600 border-rose-500/20' : isMed ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' : 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+              }`}>
+                {isHigh ? 'Cao' : isMed ? 'Trung bình' : 'Thấp'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button onClick={() => onEdit(task)} className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs">
+                ✏️
+              </button>
+              <button onClick={() => deleteTask(task.id)} className="p-1 text-slate-400 hover:text-rose-500 text-xs">
+                🗑️
+              </button>
+            </div>
+          </div>
+
+          <div className="mb-3">
+            <h4 className={`text-sm font-bold leading-snug ${isDone ? 'line-through text-slate-400' : ''}`}>
+              {task.title}
+            </h4>
+            {task.description && (
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
+                {task.description}
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between text-xs text-slate-500 pt-2 border-t border-slate-100 dark:border-slate-800/80">
+            <span className="text-[11px]">
+              {task.deadline ? `📅 ${task.deadline.replace('T', ' ')}` : 'Không có hạn'}
+            </span>
+            <span className="font-semibold">🍅 {task.completedPomos || 0}/{task.estimatedPomos || 1}</span>
+          </div>
+
+          <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-1">
+              {task.status !== 'todo' && (
+                <button
+                  onClick={() => moveTaskStatus(task.id, task.status === 'done' ? 'in_progress' : 'todo')}
+                  className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs text-slate-600 dark:text-slate-300 font-bold"
+                >
+                  ←
+                </button>
+              )}
+              {task.status !== 'done' && (
+                <button
+                  onClick={() => moveTaskStatus(task.id, task.status === 'todo' ? 'in_progress' : 'done')}
+                  className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs text-slate-600 dark:text-slate-300 font-bold"
+                >
+                  →
+                </button>
+              )}
+            </div>
+
+            {!isDone && (
+              <button
+                onClick={() => linkTaskToPomodoro(task)}
+                className={`px-3 py-1 rounded-xl text-xs font-bold shadow-sm transition ${
+                  isActive ? 'bg-indigo-600 text-white' : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20'
+                }`}
+              >
+                {isActive ? 'Đang chạy' : '▶ Tập trung'}
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // --- POMODORO VIEW ---
+    function PomodoroView({
+      settings,
+      activeTask,
+      activeTaskId,
+      setActiveTaskId,
+      tasks,
+      recordCompletedPomodoro,
+      pomoSessions,
+      todayFocusMinutes,
+      todayPomoCount,
+      showToast
+    }) {
+      const [mode, setMode] = useState('focus'); // 'focus' | 'shortBreak' | 'longBreak'
+      const [isRunning, setIsRunning] = useState(false);
+      const [cycleCount, setCycleCount] = useState(1);
+
+      const getSeconds = (m) => {
+        if (m === 'focus') return (settings.focusDuration || 25) * 60;
+        if (m === 'shortBreak') return (settings.shortBreakDuration || 5) * 60;
+        if (m === 'longBreak') return (settings.longBreakDuration || 15) * 60;
+        return 25 * 60;
+      };
+
+      const [timeLeft, setTimeLeft] = useState(() => getSeconds('focus'));
+      const [totalDuration, setTotalDuration] = useState(() => getSeconds('focus'));
+      const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+      useEffect(() => {
+        if (!isRunning) {
+          const s = getSeconds(mode);
+          setTimeLeft(s);
+          setTotalDuration(s);
+        }
+      }, [settings.focusDuration, settings.shortBreakDuration, settings.longBreakDuration, mode]);
+
+      // Timer Interval
+      useEffect(() => {
+        let timer = null;
+        if (isRunning && timeLeft > 0) {
+          timer = setInterval(() => setTimeLeft(prev => prev - 1), 1000);
+        } else if (isRunning && timeLeft === 0) {
+          handleFinished();
+        }
+        return () => { if (timer) clearInterval(timer); };
+      }, [isRunning, timeLeft]);
+
+      const handleFinished = () => {
+        setIsRunning(false);
+        if (mode === 'focus') {
+          if (settings.soundEnabled) soundManager.playFocusCompleteSound(settings.soundVolume);
+          recordCompletedPomodoro();
+          const isLong = cycleCount >= (settings.longBreakInterval || 4);
+          const next = isLong ? 'longBreak' : 'shortBreak';
+          setCycleCount(isLong ? 1 : cycleCount + 1);
+          setMode(next);
+          const dur = getSeconds(next);
+          setTimeLeft(dur);
+          setTotalDuration(dur);
+          if (settings.autoStartBreaks) {
+            setTimeout(() => setIsRunning(true), 800);
+          }
+        } else {
+          if (settings.soundEnabled) soundManager.playBreakCompleteSound(settings.soundVolume);
+          showToast('Hết giờ nghỉ ngơi, chuẩn bị vào phiên tập trung mới nhé! 🚀', 'info');
+          setMode('focus');
+          const dur = getSeconds('focus');
+          setTimeLeft(dur);
+          setTotalDuration(dur);
+          if (settings.autoStartPomos) {
+            setTimeout(() => setIsRunning(true), 800);
+          }
+        }
+      };
+
+      const handleSwitchMode = (m) => {
+        if (isRunning) {
+          if (!window.confirm('Đang đếm ngược. Bạn có muốn đổi chế độ và đặt lại không?')) return;
+        }
+        setIsRunning(false);
+        setMode(m);
+        const s = getSeconds(m);
+        setTimeLeft(s);
+        setTotalDuration(s);
+      };
+
+      const minutes = Math.floor(timeLeft / 60);
+      const seconds = timeLeft % 60;
+      const timeDisplay = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+
+      // SVG circle maths
+      const radius = 130;
+      const circumference = 2 * Math.PI * radius;
+      const progress = totalDuration > 0 ? (totalDuration - timeLeft) / totalDuration : 0;
+      const strokeDashoffset = circumference - progress * circumference;
+
+      const modeColors = {
+        focus: { color: '#6366F1', label: 'Tập Trung Sâu', badge: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20' },
+        shortBreak: { color: '#10B981', label: 'Nghỉ Ngắn', badge: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' },
+        longBreak: { color: '#0EA5E9', label: 'Nghỉ Dài', badge: 'bg-sky-500/10 text-sky-600 border-sky-500/20' },
+      };
+      const curConfig = modeColors[mode] || modeColors.focus;
+
+      return (
+        <div className="space-y-8 animate-fade-in max-w-4xl mx-auto pb-12">
+          <div className="text-center space-y-2">
+            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Đồng Hồ Pomodoro Thông Minh</h1>
+            <p className="text-sm text-slate-500">25 phút tập trung + 5 phút nghỉ ngơi giúp duy trì sự tỉnh táo tối đa.</p>
+          </div>
+
+          <div className="glass-card rounded-3xl p-6 sm:p-10 border border-slate-200 dark:border-slate-800 shadow-2xl relative overflow-hidden">
+            {/* Mode tabs */}
+            <div className="flex items-center justify-center gap-2 max-w-md mx-auto mb-6 bg-slate-100 dark:bg-slate-900/90 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800">
+              {[
+                { id: 'focus', label: 'Tập Trung', icon: '🔥' },
+                { id: 'shortBreak', label: 'Nghỉ Ngắn', icon: '☕' },
+                { id: 'longBreak', label: 'Nghỉ Dài', icon: '🛋️' },
+              ].map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => handleSwitchMode(t.id)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                    mode === t.id ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-md' : 'text-slate-500'
+                  }`}
+                >
+                  <span>{t.icon}</span>
+                  <span>{t.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Circular Timer Display */}
+            <div className="relative flex flex-col items-center justify-center py-4 select-none">
+              <div 
+                className="absolute w-72 h-72 rounded-full blur-3xl opacity-20 pointer-events-none transition-all duration-700"
+                style={{ backgroundColor: curConfig.color }}
+              />
+
+              <div className="relative w-[300px] h-[300px] sm:w-[340px] sm:h-[340px] flex items-center justify-center">
+                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 320 320">
+                  <circle cx="160" cy="160" r={radius} stroke="currentColor" strokeWidth="10" fill="transparent" className="text-slate-200 dark:text-slate-800/80" />
+                  <circle
+                    cx="160" cy="160" r={radius}
+                    stroke={curConfig.color}
+                    strokeWidth="12"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={strokeDashoffset}
+                    strokeLinecap="round"
+                    fill="transparent"
+                    className="transition-all duration-1000 ease-linear drop-shadow-md"
+                  />
+                </svg>
+
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6">
+                  <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border mb-2 uppercase tracking-wider ${curConfig.badge}`}>
+                    <span>{curConfig.label}</span>
+                  </div>
+                  <div className="text-5xl sm:text-6xl font-extrabold font-mono-timer tracking-tight text-slate-900 dark:text-white">
+                    {timeDisplay}
+                  </div>
+                  <div className="mt-3 max-w-[220px] text-xs font-medium text-slate-500 truncate">
+                    {activeTask ? `📌 ${activeTask.title}` : 'Tập trung tự do'}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Controls */}
+            <div className="flex items-center justify-center gap-4 sm:gap-6 mt-4">
+              <button
+                onClick={() => {
+                  setIsRunning(false);
+                  const dur = getSeconds(mode);
+                  setTimeLeft(dur);
+                  setTotalDuration(dur);
+                }}
+                title="Đặt lại"
+                className="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+              >
+                🔄
+              </button>
+
+              <button
+                onClick={() => {
+                  soundManager.getAudioContext();
+                  if (settings.soundEnabled) soundManager.playTapSound(settings.soundVolume);
+                  setIsRunning(!isRunning);
+                }}
+                className={`flex items-center justify-center gap-3 px-8 sm:px-10 py-4 rounded-3xl font-extrabold text-base sm:text-lg text-white shadow-xl transition-all ${
+                  isRunning ? 'bg-amber-500 shadow-amber-500/25 ring-4 ring-amber-500/20' : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-500/30 ring-4 ring-indigo-500/20'
+                }`}
+              >
+                <span>{isRunning ? '⏸ TẠM DỪNG' : '▶ BẮT ĐẦU'}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  if (window.confirm('Bỏ qua phiên hiện tại?')) handleFinished();
+                }}
+                title="Bỏ qua phiên"
+                className="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+              >
+                ⏭️
+              </button>
+            </div>
+
+            {/* Cycle Tracker */}
+            <div className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-400">
+                <span>Chu kỳ:</span>
+                <div className="flex items-center gap-1.5">
+                  {Array.from({ length: settings.longBreakInterval || 4 }).map((_, idx) => (
+                    <span
+                      key={idx}
+                      className={`w-3 h-3 rounded-full transition-all ${
+                        idx + 1 < cycleCount ? 'bg-indigo-500' : idx + 1 === cycleCount ? 'bg-indigo-500 ring-2 ring-indigo-500/40 animate-pulse' : 'bg-slate-200 dark:bg-slate-700'
+                      }`}
+                    />
+                  ))}
+                </div>
+                <span className="text-[11px] text-slate-400">({cycleCount}/{settings.longBreakInterval || 4} trước khi nghỉ dài)</span>
+              </div>
+
+              <div className="text-xs font-semibold text-slate-500">
+                Hôm nay: <strong className="text-indigo-600 dark:text-indigo-400 font-bold">{todayPomoCount}</strong> phiên ({todayFocusMinutes}p)
+              </div>
+            </div>
+          </div>
+
+          {/* Task Linker Box */}
+          <div className="glass-card rounded-2xl p-5 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-bold">
+                <span>🔗 Gắn Công Việc Đang Làm</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">Thời gian sẽ được tính vào công việc này khi hoàn thành.</p>
+            </div>
+
+            <div className="relative min-w-[280px]">
+              <button
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className="w-full flex items-center justify-between gap-2 px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm font-semibold"
+              >
+                <span className="truncate">{activeTask ? activeTask.title : '-- Chọn công việc --'}</span>
+                <span>▼</span>
+              </button>
+
+              {isDropdownOpen && (
+                <div className="absolute top-full left-0 right-0 mt-2 z-30 glass-card rounded-xl shadow-2xl p-2 space-y-1 max-h-60 overflow-y-auto border border-slate-200 dark:border-slate-700">
+                  <button
+                    onClick={() => { setActiveTaskId(null); setIsDropdownOpen(false); }}
+                    className="w-full text-left px-3 py-2 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    Tập trung tự do (Không gắn công việc)
+                  </button>
+                  {tasks.filter(t => t.status !== 'done').map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => { setActiveTaskId(t.id); setIsDropdownOpen(false); }}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-between ${
+                        t.id === activeTaskId ? 'bg-indigo-500/10 text-indigo-600 font-bold' : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <span className="truncate">{t.title}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 ml-2">{t.category}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- TASK MODAL COMPONENT ---
+    function TaskModal({ isOpen, onClose, taskToEdit, defaultStatus, onSave }) {
+      const [title, setTitle] = useState(taskToEdit ? taskToEdit.title : '');
+      const [description, setDescription] = useState(taskToEdit ? taskToEdit.description : '');
+      const [category, setCategory] = useState(taskToEdit ? taskToEdit.category : 'Công việc');
+      const [priority, setPriority] = useState(taskToEdit ? taskToEdit.priority : 'medium');
+      const [status, setStatus] = useState(taskToEdit ? taskToEdit.status : defaultStatus || 'todo');
+      const [deadline, setDeadline] = useState(taskToEdit ? taskToEdit.deadline : '');
+      const [estimatedPomos, setEstimatedPomos] = useState(taskToEdit ? taskToEdit.estimatedPomos : 2);
+
+      if (!isOpen) return null;
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!title.trim()) return;
+        onSave({
+          title,
+          description,
+          category,
+          priority,
+          status,
+          deadline,
+          estimatedPomos: Number(estimatedPomos) || 1,
+        });
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto glass-card rounded-2xl shadow-2xl p-6 border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-200 dark:border-slate-800">
+              <h2 className="text-xl font-bold">{taskToEdit ? 'Chỉnh Sửa Công Việc' : 'Tạo Công Việc Mới'}</h2>
+              <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg">✕</button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block mb-1 text-xs font-bold uppercase text-slate-500">Tên công việc *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="VD: Ôn thi giữa kỳ, Lập trình Frontend..."
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  className="w-full px-3.5 py-2.5 text-sm rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 text-xs font-bold uppercase text-slate-500">Mô tả chi tiết</label>
+                <textarea
+                  rows={3}
+                  placeholder="Ghi chú chi tiết..."
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
+                  className="w-full px-3.5 py-2.5 text-sm rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block mb-1 text-xs font-bold uppercase text-slate-500">Phân loại</label>
+                  <select
+                    value={category}
+                    onChange={e => setCategory(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold"
+                  >
+                    <option value="Công việc">Công việc</option>
+                    <option value="Học tập">Học tập</option>
+                    <option value="Cá nhân">Cá nhân</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block mb-1 text-xs font-bold uppercase text-slate-500">Mức độ ưu tiên</label>
+                  <select
+                    value={priority}
+                    onChange={e => setPriority(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold"
+                  >
+                    <option value="high">Cao (Đỏ)</option>
+                    <option value="medium">Trung bình (Vàng)</option>
+                    <option value="low">Thấp (Xanh)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block mb-1 text-xs font-bold uppercase text-slate-500">Hạn chót</label>
+                  <input
+                    type="datetime-local"
+                    value={deadline}
+                    onChange={e => setDeadline(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="block mb-1 text-xs font-bold uppercase text-slate-500">Ước tính Pomodoro (🍅)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="20"
+                    value={estimatedPomos}
+                    onChange={e => setEstimatedPomos(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
+                <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300">
+                  Hủy
+                </button>
+                <button type="submit" className="px-5 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-lg">
+                  {taskToEdit ? 'Cập Nhật' : 'Tạo Việc'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    // --- SETTINGS MODAL ---
+    function SettingsModal({ isOpen, onClose, settings, onSave, onExport, onImport, onReset, showToast }) {
+      const [formData, setFormData] = useState({ ...settings });
+      const fileRef = useRef(null);
+
+      if (!isOpen) return null;
+
+      const handleSave = (e) => {
+        e.preventDefault();
+        onSave({
+          ...formData,
+          focusDuration: Number(formData.focusDuration) || 25,
+          shortBreakDuration: Number(formData.shortBreakDuration) || 5,
+          longBreakDuration: Number(formData.longBreakDuration) || 15,
+          longBreakInterval: Number(formData.longBreakInterval) || 4,
+          dailyGoalPomos: Number(formData.dailyGoalPomos) || 8,
+          soundVolume: Number(formData.soundVolume) || 0.8,
+        });
+      };
+
+      const handleFile = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          try {
+            const data = JSON.parse(ev.target.result);
+            onImport(data);
+            onClose();
+          } catch(err) {
+            showToast('File JSON không đúng định dạng!', 'error');
+          }
+        };
+        reader.readAsText(file);
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto glass-card rounded-2xl shadow-2xl p-6 border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-200 dark:border-slate-800">
+              <h2 className="text-xl font-bold flex items-center gap-2">⚙️ Cài Đặt Hệ Thống</h2>
+              <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg">✕</button>
+            </div>
+
+            <form onSubmit={handleSave} className="space-y-5">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-indigo-600 mb-2">Thời lượng Pomodoro (Phút)</p>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-400">Tập trung</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={formData.focusDuration}
+                      onChange={e => setFormData({ ...formData, focusDuration: e.target.value })}
+                      className="w-full px-3 py-2 text-sm rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400">Nghỉ ngắn</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={formData.shortBreakDuration}
+                      onChange={e => setFormData({ ...formData, shortBreakDuration: e.target.value })}
+                      className="w-full px-3 py-2 text-sm rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400">Nghỉ dài</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={formData.longBreakDuration}
+                      onChange={e => setFormData({ ...formData, longBreakDuration: e.target.value })}
+                      className="w-full px-3 py-2 text-sm rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-emerald-600 mb-2">Mục tiêu ngày</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-400">Số phiên Pomodoro</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={formData.dailyGoalPomos}
+                      onChange={e => setFormData({ ...formData, dailyGoalPomos: e.target.value })}
+                      className="w-full px-3 py-2 text-sm rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400">Số phiên kích hoạt nghỉ dài</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={formData.longBreakInterval}
+                      onChange={e => setFormData({ ...formData, longBreakInterval: e.target.value })}
+                      className="w-full px-3 py-2 text-sm rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-100 dark:bg-slate-900/50 rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold">Âm thanh chuông báo</span>
+                  <input
+                    type="checkbox"
+                    checked={formData.soundEnabled}
+                    onChange={e => setFormData({ ...formData, soundEnabled: e.target.checked })}
+                    className="w-4 h-4 accent-indigo-600"
+                  />
+                </div>
+                {formData.soundEnabled && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400">Âm lượng:</span>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="1"
+                      step="0.05"
+                      value={formData.soundVolume}
+                      onChange={e => setFormData({ ...formData, soundVolume: e.target.value })}
+                      className="flex-1 accent-indigo-600"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => soundManager.playFocusCompleteSound(formData.soundVolume)}
+                      className="px-2 py-1 bg-indigo-500/10 text-indigo-600 text-xs font-bold rounded-lg"
+                    >
+                      Thử chuông 🔔
+                    </button>
+                  </div>
+                )}
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <span className="text-xs font-bold">Tự động chuyển sang nghỉ ngơi</span>
+                  <input
+                    type="checkbox"
+                    checked={formData.autoStartBreaks}
+                    onChange={e => setFormData({ ...formData, autoStartBreaks: e.target.checked })}
+                    className="w-4 h-4 accent-indigo-600"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Sao lưu dữ liệu</p>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={onExport} className="px-3 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-800 text-xs font-bold">
+                    📥 Xuất JSON
+                  </button>
+                  <button type="button" onClick={() => fileRef.current?.click()} className="px-3 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-800 text-xs font-bold">
+                    📤 Nhập JSON
+                  </button>
+                  <input ref={fileRef} type="file" accept=".json" onChange={handleFile} className="hidden" />
+                  <button type="button" onClick={() => { if (window.confirm('Đặt lại mặc định?')) onReset(); }} className="px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-500 text-xs font-bold ml-auto">
+                    Đặt lại mặc định
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
+                <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium">Hủy</button>
+                <button type="submit" className="px-5 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-lg">Lưu Cài Đặt</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    // Render React Root
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
