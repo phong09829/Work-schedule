@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Check, Calendar, Tag, AlertCircle, Plus, Sparkles } from 'lucide-react';
+import { X, Check, Calendar, Tag, AlertCircle, Plus, Sparkles, RefreshCw } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
 export const TaskModal = ({ isOpen, onClose, taskToEdit, defaultStatus = 'todo' }) => {
@@ -13,6 +13,7 @@ export const TaskModal = ({ isOpen, onClose, taskToEdit, defaultStatus = 'todo' 
     status: defaultStatus,
     deadline: '',
     estimatedPomos: 2,
+    syncToCalendar: true,
   });
 
   const [customCategory, setCustomCategory] = useState('');
@@ -30,6 +31,7 @@ export const TaskModal = ({ isOpen, onClose, taskToEdit, defaultStatus = 'todo' 
         status: taskToEdit.status || 'todo',
         deadline: taskToEdit.deadline || '',
         estimatedPomos: taskToEdit.estimatedPomos || 1,
+        syncToCalendar: false,
       });
       if (!categories.includes(taskToEdit.category)) {
         setShowCustomCat(true);
@@ -44,6 +46,7 @@ export const TaskModal = ({ isOpen, onClose, taskToEdit, defaultStatus = 'todo' 
         status: defaultStatus,
         deadline: '',
         estimatedPomos: 2,
+        syncToCalendar: true,
       });
       setShowCustomCat(false);
       setCustomCategory('');
@@ -224,6 +227,19 @@ export const TaskModal = ({ isOpen, onClose, taskToEdit, defaultStatus = 'todo' 
               />
             </div>
           </div>
+
+          {/* Sync to Calendar Option if deadline provided */}
+          {!taskToEdit && formData.deadline && (
+            <label className="flex items-center gap-2 p-3 rounded-xl bg-brand-500/10 border border-brand-500/20 text-xs font-semibold text-brand-700 dark:text-brand-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.syncToCalendar}
+                onChange={e => setFormData({ ...formData, syncToCalendar: e.target.checked })}
+                className="w-4 h-4 rounded text-brand-600 focus:ring-brand-500"
+              />
+              <span>Tự động đưa công việc này vào Lịch Trình (Calendar)</span>
+            </label>
+          )}
 
           {/* Status Selection */}
           <div>

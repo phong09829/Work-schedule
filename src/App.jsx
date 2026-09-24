@@ -4,6 +4,7 @@ import { AppProvider, useApp } from './context/AppContext';
 import { Navbar } from './components/Navbar';
 import { DashboardView } from './components/Dashboard/DashboardView';
 import { TaskView } from './components/Tasks/TaskView';
+import { CalendarView } from './components/Calendar/CalendarView';
 import { PomodoroView } from './components/Pomodoro/PomodoroView';
 import { Toast } from './components/UI/Toast';
 
@@ -14,6 +15,7 @@ const MainContent = () => {
     <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-20 md:pb-12 relative z-10">
       {activeTab === 'dashboard' && <DashboardView />}
       {activeTab === 'tasks' && <TaskView />}
+      {activeTab === 'calendar' && <CalendarView />}
       {activeTab === 'pomodoro' && <PomodoroView />}
     </main>
   );
@@ -42,7 +44,7 @@ export default function App() {
 
           {/* Desktop Subtle Footer */}
           <footer className="hidden md:block py-6 border-t border-slate-200/80 dark:border-slate-800/80 text-center text-xs text-slate-400 dark:text-slate-600 relative z-10">
-            FocusFlow © 2026 • Ứng Dụng Quản Lý Thời Gian & Pomodoro Toàn Diện
+            FocusFlow © 2026 • Lịch Trình, Google Calendar 2-Way Sync & Pomodoro Toàn Diện
           </footer>
         </div>
       </AppProvider>
