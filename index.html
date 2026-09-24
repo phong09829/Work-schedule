@@ -56,7 +56,6 @@
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.browser.min.js"></script>
 
   <style>
-    /* Glassmorphism & Custom Styling */
     .font-mono-timer {
       font-family: 'JetBrains Mono', monospace;
       font-variant-numeric: tabular-nums;
@@ -101,7 +100,6 @@
       opacity: 0.12;
     }
 
-    /* Custom Scrollbar */
     ::-webkit-scrollbar {
       width: 6px;
       height: 6px;
@@ -151,7 +149,7 @@
       playFocusCompleteSound(volume = 0.8) {
         const ctx = this.getAudioContext();
         if (!ctx) return;
-        const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+        const notes = [523.25, 659.25, 783.99, 1046.50];
         const now = ctx.currentTime;
         notes.forEach((freq, idx) => {
           const osc = ctx.createOscillator();
@@ -514,7 +512,6 @@
 
     // --- MAIN APP COMPONENT ---
     function App() {
-      // Theme
       const [isDark, setIsDark] = useState(() => getStored(STORAGE_KEYS.THEME, 'dark') === 'dark');
       
       useEffect(() => {
@@ -524,17 +521,14 @@
         setStored(STORAGE_KEYS.THEME, isDark ? 'dark' : 'light');
       }, [isDark]);
 
-      // Navigation: 'dashboard' | 'tasks' | 'calendar' | 'pomodoro'
       const [activeTab, setActiveTab] = useState('dashboard');
 
-      // Global Data
       const [tasks, setTasks] = useState(() => getStored(STORAGE_KEYS.TASKS, DEFAULT_TASKS));
       const [events, setEvents] = useState(() => getStored(STORAGE_KEYS.EVENTS, DEFAULT_EVENTS));
       const [pomoSessions, setPomoSessions] = useState(() => getStored(STORAGE_KEYS.POMO_SESSIONS, generateInitialPomoSessions()));
       const [settings, setSettings] = useState(() => getStored(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS));
       const [activeTaskId, setActiveTaskId] = useState(() => tasks.find(t => t.status === 'in_progress')?.id || tasks[0]?.id || null);
       
-      // Google OAuth State
       const [googleClientId, setGoogleClientId] = useState(() => getStored(STORAGE_KEYS.GOOGLE_CLIENT_ID, ''));
       const [googleUser, setGoogleUser] = useState(() => getStored(STORAGE_KEYS.GOOGLE_USER, null));
       const [googleToken, setGoogleToken] = useState(() => getStored(STORAGE_KEYS.GOOGLE_TOKEN, null));
@@ -542,21 +536,18 @@
 
       const isGoogleConnected = Boolean(googleUser && googleToken?.access_token);
 
-      // Toast notification
       const [toast, setToast] = useState(null);
       const showToast = (message, type = 'success') => {
         setToast({ message, type, id: Date.now() });
         setTimeout(() => setToast(current => current && current.id <= Date.now() - 3000 ? null : current), 3000);
       };
 
-      // Modals
       const [isSettingsOpen, setIsSettingsOpen] = useState(false);
       const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
       const [taskToEdit, setTaskToEdit] = useState(null);
       const [defaultStatusForNew, setDefaultStatusForNew] = useState('todo');
       const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
 
-      // Persist data
       useEffect(() => setStored(STORAGE_KEYS.TASKS, tasks), [tasks]);
       useEffect(() => setStored(STORAGE_KEYS.EVENTS, events), [events]);
       useEffect(() => setStored(STORAGE_KEYS.POMO_SESSIONS, pomoSessions), [pomoSessions]);
@@ -565,10 +556,8 @@
       useEffect(() => setStored(STORAGE_KEYS.GOOGLE_USER, googleUser), [googleUser]);
       useEffect(() => setStored(STORAGE_KEYS.GOOGLE_TOKEN, googleToken), [googleToken]);
 
-      // Active task computed
       const activeTask = useMemo(() => tasks.find(t => t.id === activeTaskId) || null, [tasks, activeTaskId]);
 
-      // Google 2-way sync method
       const syncWithGoogleCalendar = async (customToken = null) => {
         const token = customToken || googleToken?.access_token;
         if (!token) {
@@ -617,7 +606,6 @@
         showToast('Đã đăng xuất Google.', 'info');
       };
 
-      // Calendar Actions with Instant 2-way Google Sync
       const addEvent = async (eventData) => {
         const newEvent = {
           id: `evt-${Date.now()}`,
@@ -720,7 +708,6 @@
         showToast(`Đã chọn "${event.title}" cho phiên Pomodoro`, 'info');
       };
 
-      // Task actions
       const addTask = (taskData) => {
         const newTask = {
           id: `task-${Date.now()}`,
@@ -801,7 +788,6 @@
         showToast(`Đã chọn "${task.title}" cho Pomodoro`, 'info');
       };
 
-      // Pomodoro record
       const recordCompletedPomodoro = () => {
         const todayStr = new Date().toISOString().split('T')[0];
         const durationMins = settings.focusDuration || 25;
@@ -860,7 +846,6 @@
 
       return (
         <div className="min-h-screen relative flex flex-col transition-colors duration-300">
-          {/* Ambient Background Glows */}
           <div className="ambient-glow top-0 left-1/4 w-96 h-96 bg-indigo-500" />
           <div className="ambient-glow top-1/3 right-10 w-80 h-80 bg-purple-500" />
           <div className="ambient-glow bottom-10 left-10 w-80 h-80 bg-emerald-500" />
@@ -869,8 +854,6 @@
           <header className="sticky top-0 z-40 w-full glass-nav">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
               <div className="flex items-center justify-between h-16">
-                
-                {/* Brand Logo */}
                 <div onClick={() => setActiveTab('dashboard')} className="flex items-center gap-3 cursor-pointer group select-none">
                   <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-500 flex items-center justify-center shadow-lg shadow-indigo-500/25 group-hover:scale-105 transition-transform text-white font-bold text-lg">
                     ⏱️
@@ -885,7 +868,6 @@
                   </div>
                 </div>
 
-                {/* Navigation Tabs */}
                 <nav className="hidden md:flex items-center gap-1 bg-slate-200/60 dark:bg-slate-900/60 p-1.5 rounded-2xl border border-slate-300/50 dark:border-slate-800/80 backdrop-blur-md">
                   {[
                     { id: 'dashboard', label: 'Bảng Điều Khiển', icon: '📊' },
@@ -911,9 +893,7 @@
                   })}
                 </nav>
 
-                {/* Right Quick Actions */}
                 <div className="flex items-center gap-2 sm:gap-2.5">
-                  {/* Google Sync Status Pill */}
                   <button
                     onClick={() => setIsGoogleModalOpen(true)}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
@@ -957,10 +937,10 @@
             </div>
           </header>
 
-          {/* Main Views Container */}
+          {/* Main Content */}
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-24 md:pb-12 relative z-10">
             {activeTab === 'dashboard' && (
-              <DashboardView
+              <DashboardViewStandalone
                 todayFocusMinutes={todayFocusMinutes}
                 todayCompletedTasks={todayCompletedTasks}
                 totalCompletedTasks={totalCompletedTasks}
@@ -978,7 +958,7 @@
             )}
 
             {activeTab === 'tasks' && (
-              <TaskView
+              <TaskViewStandalone
                 tasks={tasks}
                 onEditTask={(t) => { setTaskToEdit(t); setIsTaskModalOpen(true); }}
                 onAddNew={(status = 'todo') => { setTaskToEdit(null); setDefaultStatusForNew(status); setIsTaskModalOpen(true); }}
@@ -1004,7 +984,7 @@
             )}
 
             {activeTab === 'pomodoro' && (
-              <PomodoroView
+              <PomodoroViewStandalone
                 settings={settings}
                 activeTask={activeTask}
                 activeTaskId={activeTaskId}
@@ -1019,7 +999,7 @@
             )}
           </main>
 
-          {/* Mobile Bottom Navigation */}
+          {/* Mobile Bottom Bar */}
           <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-t border-slate-200 dark:border-slate-800 px-3 py-2 flex justify-around items-center">
             {[
               { id: 'dashboard', label: 'Tổng quan', icon: '📊' },
@@ -1043,7 +1023,7 @@
             })}
           </nav>
 
-          {/* Toast Container */}
+          {/* Toast */}
           {toast && (
             <div className="fixed bottom-20 sm:bottom-6 right-6 z-50 animate-fade-in">
               <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-indigo-500/30 bg-slate-900/95 text-slate-100 shadow-xl backdrop-blur-md text-sm font-medium">
@@ -1053,7 +1033,7 @@
             </div>
           )}
 
-          {/* Task Modal */}
+          {/* Modals */}
           {isTaskModalOpen && (
             <TaskModalStandalone
               isOpen={isTaskModalOpen}
@@ -1068,7 +1048,6 @@
             />
           )}
 
-          {/* Google OAuth Modal */}
           {isGoogleModalOpen && (
             <GoogleOAuthModalStandalone
               isOpen={isGoogleModalOpen}
@@ -1085,7 +1064,6 @@
             />
           )}
 
-          {/* Settings Modal */}
           {isSettingsOpen && (
             <SettingsModalStandalone
               isOpen={isSettingsOpen}
@@ -1128,20 +1106,602 @@
       );
     }
 
-    // --- CALENDAR VIEW COMPONENT (Google Schedule Style) ---
-    function CalendarViewStandalone({
+    // --- 1. DASHBOARD VIEW STANDALONE ---
+    function DashboardViewStandalone({
+      todayFocusMinutes,
+      todayCompletedTasks,
+      totalCompletedTasks,
+      todayPomoCount,
+      streakDays,
+      tasks,
       events,
-      onAddEvent,
-      onUpdateEvent,
-      onDeleteEvent,
-      onLinkPomodoro,
-      isGoogleConnected,
-      isGoogleSyncing,
-      onSyncGoogle,
-      onOpenGoogleConfig
+      pomoSessions,
+      settings,
+      setActiveTab,
+      linkTaskToPomodoro,
+      moveTaskStatus,
+      isDark
     }) {
+      const hours = (todayFocusMinutes / 60).toFixed(1);
+      const targetPomos = settings.dailyGoalPomos || 8;
+      const goalProgress = Math.min(100, Math.round((todayPomoCount / targetPomos) * 100));
+
+      const urgentTask = useMemo(() => {
+        return (
+          tasks.find(t => t.status === 'in_progress' && t.priority === 'high') ||
+          tasks.find(t => t.status === 'in_progress') ||
+          tasks.find(t => t.status === 'todo' && t.priority === 'high') ||
+          tasks.find(t => t.status === 'todo') ||
+          null
+        );
+      }, [tasks]);
+
+      const recentTasks = useMemo(() => tasks.slice(0, 4), [tasks]);
+
+      // Chart.js initialization
+      const barCanvasRef = useRef(null);
+      const doughnutCanvasRef = useRef(null);
+
+      useEffect(() => {
+        let barChart = null;
+        let doughnutChart = null;
+
+        if (barCanvasRef.current && window.Chart) {
+          const days = [];
+          const points = [];
+          const dayNames = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+
+          for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            const dateStr = d.toISOString().split('T')[0];
+            const dayName = dayNames[d.getDay()];
+            const totalMins = pomoSessions
+              .filter(s => s.date === dateStr && s.type === 'focus')
+              .reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+            days.push(`${dayName} (${d.getDate()}/${d.getMonth() + 1})`);
+            points.push(totalMins);
+          }
+
+          barChart = new window.Chart(barCanvasRef.current, {
+            type: 'bar',
+            data: {
+              labels: days,
+              datasets: [{
+                label: 'Phút tập trung',
+                data: points,
+                backgroundColor: 'rgba(99, 102, 241, 0.85)',
+                hoverBackgroundColor: 'rgba(79, 70, 229, 1)',
+                borderRadius: 8,
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                y: {
+                  beginAtZero: true,
+                  grid: { color: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' },
+                  ticks: { color: isDark ? '#94a3b8' : '#64748b' }
+                },
+                x: {
+                  grid: { display: false },
+                  ticks: { color: isDark ? '#94a3b8' : '#64748b' }
+                }
+              }
+            }
+          });
+        }
+
+        if (doughnutCanvasRef.current && window.Chart) {
+          const catMap = {};
+          pomoSessions.forEach(s => {
+            const cat = s.category || 'Công việc';
+            catMap[cat] = (catMap[cat] || 0) + (s.durationMinutes || 25);
+          });
+          const labels = Object.keys(catMap).length ? Object.keys(catMap) : ['Công việc', 'Học tập', 'Cá nhân'];
+          const dataValues = Object.keys(catMap).length ? Object.values(catMap) : [120, 90, 45];
+
+          doughnutChart = new window.Chart(doughnutCanvasRef.current, {
+            type: 'doughnut',
+            data: {
+              labels: labels,
+              datasets: [{
+                data: dataValues,
+                backgroundColor: ['#6366f1', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444'],
+                borderWidth: 0,
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { position: 'bottom', labels: { color: isDark ? '#94a3b8' : '#64748b', boxWidth: 12 } }
+              },
+              cutout: '70%'
+            }
+          });
+        }
+
+        return () => {
+          if (barChart) barChart.destroy();
+          if (doughnutChart) doughnutChart.destroy();
+        };
+      }, [pomoSessions, isDark]);
+
+      return (
+        <div className="space-y-8 animate-fade-in pb-12">
+          {/* Welcome Banner */}
+          <div className="relative overflow-hidden rounded-3xl p-6 sm:p-8 bg-gradient-to-r from-indigo-600 via-indigo-600 to-purple-600 text-white shadow-2xl shadow-indigo-500/20">
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div className="max-w-xl">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 backdrop-blur-md text-xs font-semibold mb-3 border border-white/20">
+                  <span>✨</span>
+                  <span>Chào mừng bạn đến với FocusFlow</span>
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+                  Làm chủ thời gian, tối đa hóa năng suất
+                </h1>
+                <p className="mt-2 text-sm text-indigo-100/90 leading-relaxed">
+                  Bạn đã hoàn thành <strong className="text-white font-bold">{todayPomoCount}</strong> phiên Pomodoro hôm nay. Tiếp tục duy trì chuỗi <strong className="text-amber-300 font-bold">{streakDays} ngày</strong> bứt phá nhé!
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 shrink-0">
+                <button
+                  onClick={() => setActiveTab('pomodoro')}
+                  className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-white text-indigo-700 font-bold text-sm shadow-lg shadow-black/10 hover:bg-indigo-50 transition-all active:scale-95"
+                >
+                  <span>⏱️</span>
+                  <span>Bật Pomodoro Ngay</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('calendar')}
+                  className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-white/15 hover:bg-white/25 border border-white/20 text-white font-semibold text-sm backdrop-blur-md transition-all"
+                >
+                  <span>📅</span>
+                  <span>Xem Lịch Trình</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-6 pt-5 border-t border-white/15">
+              <div className="flex items-center justify-between text-xs font-bold mb-2">
+                <span>Tiến độ mục tiêu hôm nay: {todayPomoCount} / {targetPomos} Pomodoro</span>
+                <span>{goalProgress}%</span>
+              </div>
+              <div className="w-full h-2.5 bg-black/20 rounded-full overflow-hidden p-0.5">
+                <div className="h-full bg-gradient-to-r from-amber-300 to-emerald-300 rounded-full transition-all duration-500" style={{ width: `${goalProgress}%` }} />
+              </div>
+            </div>
+          </div>
+
+          {/* Metric Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+            <div className="glass-card rounded-2xl p-5 border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-400">Việc Xong Hôm Nay</span>
+                <span className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500 text-lg">✅</span>
+              </div>
+              <h3 className="text-2xl font-extrabold mt-2">{todayCompletedTasks}</h3>
+              <p className="text-xs text-slate-400 mt-1">Tổng hoàn thành: {totalCompletedTasks} việc</p>
+            </div>
+
+            <div className="glass-card rounded-2xl p-5 border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-400">Thời Gian Tập Trung</span>
+                <span className="p-2 rounded-xl bg-indigo-500/10 text-indigo-500 text-lg">🕒</span>
+              </div>
+              <h3 className="text-2xl font-extrabold mt-2">{hours}h</h3>
+              <p className="text-xs text-slate-400 mt-1">{todayFocusMinutes} phút tập trung sâu</p>
+            </div>
+
+            <div className="glass-card rounded-2xl p-5 border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-400">Phiên Pomodoro</span>
+                <span className="p-2 rounded-xl bg-purple-500/10 text-purple-500 text-lg">🍅</span>
+              </div>
+              <h3 className="text-2xl font-extrabold mt-2">{todayPomoCount}</h3>
+              <p className="text-xs text-slate-400 mt-1">Mục tiêu: {targetPomos} phiên/ngày</p>
+            </div>
+
+            <div className="glass-card rounded-2xl p-5 border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-400">Chuỗi Kỷ Lục</span>
+                <span className="p-2 rounded-xl bg-amber-500/10 text-amber-500 text-lg">🔥</span>
+              </div>
+              <h3 className="text-2xl font-extrabold mt-2">{streakDays} ngày</h3>
+              <p className="text-xs text-amber-500 font-bold mt-1">Đang cháy!</p>
+            </div>
+          </div>
+
+          {/* Charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 glass-card rounded-2xl p-6 border border-slate-200 dark:border-slate-800">
+              <h3 className="font-bold text-base mb-4">Biểu Đồ Năng Suất 7 Ngày Gần Nhất</h3>
+              <div className="h-64">
+                <canvas ref={barCanvasRef} />
+              </div>
+            </div>
+
+            <div className="glass-card rounded-2xl p-6 border border-slate-200 dark:border-slate-800">
+              <h3 className="font-bold text-base mb-4">Phân Bổ Theo Danh Mục</h3>
+              <div className="h-64">
+                <canvas ref={doughnutCanvasRef} />
+              </div>
+            </div>
+          </div>
+
+          {/* Urgent Task & Recent List */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="glass-card rounded-2xl p-6 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-rose-500 flex items-center gap-1.5 mb-2">
+                  <span>⚡</span> Công việc cần tập trung
+                </span>
+                {urgentTask ? (
+                  <div className="space-y-2">
+                    <h3 className="font-bold text-lg">{urgentTask.title}</h3>
+                    <p className="text-xs text-slate-400 line-clamp-2">{urgentTask.description || 'Chưa có mô tả.'}</p>
+                    <div className="flex gap-2 text-xs pt-2">
+                      <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-500 font-bold">{urgentTask.category}</span>
+                      <span className="text-slate-400">🍅 {urgentTask.completedPomos || 0}/{urgentTask.estimatedPomos || 1} Pomos</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-6 text-center text-slate-400">
+                    <p>Tuyệt vời! Đã hết việc cần làm.</p>
+                  </div>
+                )}
+              </div>
+              {urgentTask && (
+                <button
+                  onClick={() => linkTaskToPomodoro(urgentTask)}
+                  className="mt-4 w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition"
+                >
+                  Bắt đầu phiên cho việc này ⏱️
+                </button>
+              )}
+            </div>
+
+            <div className="lg:col-span-2 glass-card rounded-2xl p-6 border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold text-base">Danh Sách Công Việc Gần Đây</h3>
+                <button onClick={() => setActiveTab('tasks')} className="text-xs text-indigo-500 font-bold hover:underline">Xem tất cả →</button>
+              </div>
+
+              <div className="space-y-2.5">
+                {recentTasks.map(t => (
+                  <div key={t.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/60 text-xs">
+                    <div className="flex items-center gap-2.5 truncate">
+                      <button
+                        onClick={() => moveTaskStatus(t.id, t.status === 'done' ? 'todo' : 'done')}
+                        className={`w-4 h-4 rounded border flex items-center justify-center ${t.status === 'done' ? 'bg-emerald-500 text-white' : ''}`}
+                      >
+                        {t.status === 'done' ? '✓' : ''}
+                      </button>
+                      <span className={`font-semibold truncate ${t.status === 'done' ? 'line-through text-slate-400' : ''}`}>{t.title}</span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className="px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 font-bold text-[10px]">{t.category}</span>
+                      <button onClick={() => linkTaskToPomodoro(t)} className="p-1 rounded bg-indigo-500/10 text-indigo-500">▶</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- 2. TASK VIEW STANDALONE (Kanban Board) ---
+    function TaskViewStandalone({ tasks, onEditTask, onAddNew, moveTaskStatus, deleteTask, linkTaskToPomodoro, activeTaskId }) {
+      const [searchQuery, setSearchQuery] = useState('');
+      const [selectedCat, setSelectedCat] = useState('all');
+      const [viewMode, setViewMode] = useState('kanban'); // 'kanban' | 'list'
+
+      const filtered = useMemo(() => {
+        return tasks.filter(t => {
+          const matchQ = !searchQuery || t.title.toLowerCase().includes(searchQuery.toLowerCase());
+          const matchC = selectedCat === 'all' || t.category === selectedCat;
+          return matchQ && matchC;
+        });
+      }, [tasks, searchQuery, selectedCat]);
+
+      const columns = [
+        { id: 'todo', title: 'Cần Làm', color: 'border-indigo-500/40 text-indigo-500' },
+        { id: 'in_progress', title: 'Đang Làm', color: 'border-amber-500/40 text-amber-500' },
+        { id: 'done', title: 'Hoàn Thành', color: 'border-emerald-500/40 text-emerald-500' },
+      ];
+
+      return (
+        <div className="space-y-6 animate-fade-in pb-12">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight flex items-center gap-2">
+                <span>📋</span>
+                <span>Quản Lý Công Việc</span>
+              </h1>
+              <p className="text-xs text-slate-400 mt-1">Tổng cộng: {tasks.length} công việc ({tasks.filter(t => t.status === 'done').length} đã xong)</p>
+            </div>
+
+            <button
+              onClick={() => onAddNew('todo')}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-500/25 active:scale-95 transition"
+            >
+              <span>➕</span>
+              <span>Thêm Công Việc</span>
+            </button>
+          </div>
+
+          <div className="glass-card rounded-2xl p-4 border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+            <input
+              type="text"
+              placeholder="Tìm kiếm công việc..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 border text-xs font-medium w-48 sm:w-64"
+            />
+
+            <div className="flex items-center gap-2">
+              <select
+                value={selectedCat}
+                onChange={e => setSelectedCat(e.target.value)}
+                className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 border text-xs font-semibold"
+              >
+                <option value="all">Tất cả phân loại</option>
+                <option value="Công việc">Công việc</option>
+                <option value="Học tập">Học tập</option>
+                <option value="Cá nhân">Cá nhân</option>
+              </select>
+
+              <div className="flex p-1 rounded-xl bg-slate-200 dark:bg-slate-800 text-xs font-bold">
+                <button
+                  onClick={() => setViewMode('kanban')}
+                  className={`px-3 py-1 rounded-lg ${viewMode === 'kanban' ? 'bg-white dark:bg-slate-700 text-indigo-500' : 'text-slate-400'}`}
+                >
+                  Kanban
+                </button>
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={`px-3 py-1 rounded-lg ${viewMode === 'list' ? 'bg-white dark:bg-slate-700 text-indigo-500' : 'text-slate-400'}`}
+                >
+                  Danh sách
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {viewMode === 'kanban' ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+              {columns.map(col => {
+                const colTasks = filtered.filter(t => t.status === col.id);
+                return (
+                  <div
+                    key={col.id}
+                    onDragOver={e => e.preventDefault()}
+                    onDrop={e => {
+                      const taskId = e.dataTransfer.getData('text/plain');
+                      if (taskId) moveTaskStatus(taskId, col.id);
+                    }}
+                    className="flex flex-col rounded-3xl p-4 bg-slate-100/70 dark:bg-slate-900/40 border border-slate-200/80 dark:border-slate-800 min-h-[450px]"
+                  >
+                    <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-200 dark:border-slate-800">
+                      <h3 className={`text-sm font-extrabold flex items-center gap-2 ${col.color}`}>
+                        <span>{col.title}</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold">{colTasks.length}</span>
+                      </h3>
+                      <button onClick={() => onAddNew(col.id)} className="text-slate-400 hover:text-slate-200 text-sm font-bold">+</button>
+                    </div>
+
+                    <div className="space-y-3 flex-1 overflow-y-auto">
+                      {colTasks.map(t => (
+                        <div
+                          key={t.id}
+                          draggable
+                          onDragStart={e => e.dataTransfer.setData('text/plain', t.id)}
+                          onClick={() => onEditTask(t)}
+                          className="glass-card rounded-2xl p-4 border border-slate-200 dark:border-slate-800 hover:shadow-md transition cursor-pointer space-y-2"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <h4 className="font-bold text-sm text-slate-900 dark:text-slate-100">{t.title}</h4>
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${
+                              t.priority === 'high' ? 'bg-rose-500/10 text-rose-500' : t.priority === 'medium' ? 'bg-amber-500/10 text-amber-500' : 'bg-emerald-500/10 text-emerald-500'
+                            }`}>
+                              {t.priority}
+                            </span>
+                          </div>
+                          {t.description && <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{t.description}</p>}
+                          <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+                            <span className="text-slate-400">🍅 {t.completedPomos || 0}/{t.estimatedPomos || 1}</span>
+                            <div className="flex gap-1.5">
+                              <button onClick={(e) => { e.stopPropagation(); linkTaskToPomodoro(t); }} className="px-2 py-1 bg-indigo-500/10 text-indigo-500 rounded-lg font-bold text-[10px]">
+                                Focus ▶
+                              </button>
+                              <button onClick={(e) => { e.stopPropagation(); deleteTask(t.id); }} className="p-1 text-rose-500 hover:bg-rose-500/10 rounded">
+                                🗑️
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filtered.map(t => (
+                <div key={t.id} onClick={() => onEditTask(t)} className="glass-card rounded-2xl p-4 border border-slate-200 dark:border-slate-800 hover:shadow-md transition cursor-pointer space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-sm">{t.title}</h4>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-500 font-bold">{t.category}</span>
+                  </div>
+                  <p className="text-xs text-slate-400">{t.description || 'Không có mô tả'}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // --- 3. POMODORO VIEW STANDALONE ---
+    function PomodoroViewStandalone({ settings, activeTask, activeTaskId, setActiveTaskId, tasks, recordCompletedPomodoro, pomoSessions, todayFocusMinutes, todayPomoCount, showToast }) {
+      const [mode, setMode] = useState('focus');
+      const [isRunning, setIsRunning] = useState(false);
+      const [cycleCount, setCycleCount] = useState(1);
+
+      const getSeconds = (m) => {
+        if (m === 'focus') return (settings.focusDuration || 25) * 60;
+        if (m === 'shortBreak') return (settings.shortBreakDuration || 5) * 60;
+        if (m === 'longBreak') return (settings.longBreakDuration || 15) * 60;
+        return 25 * 60;
+      };
+
+      const [timeLeft, setTimeLeft] = useState(() => getSeconds('focus'));
+      const [totalDuration, setTotalDuration] = useState(() => getSeconds('focus'));
+
+      useEffect(() => {
+        if (!isRunning) {
+          const s = getSeconds(mode);
+          setTimeLeft(s);
+          setTotalDuration(s);
+        }
+      }, [settings, mode]);
+
+      useEffect(() => {
+        let interval = null;
+        if (isRunning && timeLeft > 0) {
+          interval = setInterval(() => setTimeLeft(prev => prev - 1), 1000);
+        } else if (isRunning && timeLeft === 0) {
+          setIsRunning(false);
+          if (mode === 'focus') {
+            if (settings.soundEnabled) soundManager.playFocusCompleteSound(settings.soundVolume);
+            recordCompletedPomodoro('focus');
+            const isLong = cycleCount >= (settings.longBreakInterval || 4);
+            setCycleCount(prev => isLong ? 1 : prev + 1);
+            setMode(isLong ? 'longBreak' : 'shortBreak');
+            const nextSec = getSeconds(isLong ? 'longBreak' : 'shortBreak');
+            setTimeLeft(nextSec);
+            setTotalDuration(nextSec);
+          } else {
+            if (settings.soundEnabled) soundManager.playBreakCompleteSound(settings.soundVolume);
+            setMode('focus');
+            const nextSec = getSeconds('focus');
+            setTimeLeft(nextSec);
+            setTotalDuration(nextSec);
+          }
+        }
+        return () => { if (interval) clearInterval(interval); };
+      }, [isRunning, timeLeft]);
+
+      const formatTime = (secs) => {
+        const m = Math.floor(secs / 60);
+        const s = secs % 60;
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      };
+
+      const progress = totalDuration > 0 ? (totalDuration - timeLeft) / totalDuration : 0;
+      const strokeDashoffset = 880 - 880 * progress;
+
+      return (
+        <div className="space-y-8 animate-fade-in max-w-3xl mx-auto pb-12">
+          <div className="text-center space-y-2">
+            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Đồng Hồ Pomodoro Thông Minh</h1>
+            <p className="text-xs sm:text-sm text-slate-400">25 phút tập trung cao độ + 5 phút nghỉ ngơi duy trì trạng thái Deep Work.</p>
+          </div>
+
+          <div className="glass-card rounded-3xl p-6 sm:p-10 border border-slate-200 dark:border-slate-800 shadow-2xl relative overflow-hidden flex flex-col items-center">
+            <div className="flex gap-2 mb-6 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800">
+              {[
+                { id: 'focus', label: 'Tập Trung 🍅' },
+                { id: 'shortBreak', label: 'Nghỉ Ngắn ☕' },
+                { id: 'longBreak', label: 'Nghỉ Dài 🛋️' },
+              ].map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => { setIsRunning(false); setMode(t.id); const sec = getSeconds(t.id); setTimeLeft(sec); setTotalDuration(sec); }}
+                  className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition ${
+                    mode === t.id ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-md' : 'text-slate-400'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Circular Progress Timer */}
+            <div className="relative w-72 h-72 flex items-center justify-center">
+              <svg className="w-full h-full transform -rotate-90" viewBox="0 0 300 300">
+                <circle cx="150" cy="150" r="140" stroke="currentColor" strokeWidth="12" fill="transparent" className="text-slate-200 dark:text-slate-800" />
+                <circle
+                  cx="150"
+                  cy="150"
+                  r="140"
+                  stroke={mode === 'focus' ? '#6366f1' : '#10b981'}
+                  strokeWidth="12"
+                  strokeDasharray="880"
+                  strokeDashoffset={strokeDashoffset}
+                  strokeLinecap="round"
+                  fill="transparent"
+                  className="transition-all duration-1000 ease-linear"
+                />
+              </svg>
+
+              <div className="absolute flex flex-col items-center justify-center text-center">
+                <span className="font-mono text-5xl sm:text-6xl font-extrabold tracking-tight">
+                  {formatTime(timeLeft)}
+                </span>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 mt-2">
+                  {mode === 'focus' ? 'Phiên Tập Trung' : 'Giờ Nghỉ Ngơi'}
+                </span>
+                {activeTask && (
+                  <span className="text-xs font-semibold text-indigo-500 mt-1 max-w-[180px] truncate">
+                    🎯 {activeTask.title}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Controls */}
+            <div className="flex items-center gap-4 mt-8">
+              <button
+                onClick={() => { setIsRunning(false); setTimeLeft(getSeconds(mode)); }}
+                className="px-4 py-2.5 rounded-2xl bg-slate-200 dark:bg-slate-800 text-xs font-bold hover:bg-slate-300 transition"
+              >
+                Đặt Lại
+              </button>
+              <button
+                onClick={() => { soundManager.getAudioContext(); soundManager.playTapSound(); setIsRunning(!isRunning); }}
+                className="px-8 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-base shadow-xl shadow-indigo-500/30 active:scale-95 transition"
+              >
+                {isRunning ? 'TẠM DỪNG' : 'BẮT ĐẦU'}
+              </button>
+              <button
+                onClick={() => setTimeLeft(0)}
+                className="px-4 py-2.5 rounded-2xl bg-slate-200 dark:bg-slate-800 text-xs font-bold hover:bg-slate-300 transition"
+              >
+                Bỏ Qua
+              </button>
+            </div>
+
+            <div className="mt-8 pt-4 border-t border-slate-200 dark:border-slate-800 w-full flex items-center justify-between text-xs text-slate-400">
+              <span>Chu kỳ: {cycleCount}/{settings.longBreakInterval || 4}</span>
+              <span>Hôm nay: {todayPomoCount} phiên ({todayFocusMinutes}p)</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- 4. CALENDAR VIEW STANDALONE ---
+    function CalendarViewStandalone({ events, onAddEvent, onUpdateEvent, onDeleteEvent, onLinkPomodoro, isGoogleConnected, isGoogleSyncing, onSyncGoogle, onOpenGoogleConfig }) {
       const [currentDate, setCurrentDate] = useState(new Date());
-      const [viewMode, setViewMode] = useState('month'); // 'month' | 'week' | 'day' | 'agenda'
+      const [viewMode, setViewMode] = useState('month');
       const [searchQuery, setSearchQuery] = useState('');
       const [selectedCategory, setSelectedCategory] = useState('all');
 
@@ -1189,7 +1749,6 @@
 
       return (
         <div className="space-y-6 animate-fade-in pb-12">
-          {/* Header */}
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div>
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight flex items-center gap-2.5">
@@ -1232,7 +1791,7 @@
             </div>
           </div>
 
-          {/* Controls Bar */}
+          {/* Controls */}
           <div className="glass-card rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
               <button
@@ -1254,13 +1813,13 @@
                 placeholder="Tìm sự kiện..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs w-36 sm:w-44 font-medium"
+                className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs w-36 sm:w-44 font-medium"
               />
 
               <select
                 value={selectedCategory}
                 onChange={e => setSelectedCategory(e.target.value)}
-                className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs font-semibold"
+                className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold"
               >
                 <option value="all">Tất cả danh mục</option>
                 {EVENT_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
@@ -1287,7 +1846,6 @@
             </div>
           </div>
 
-          {/* Views */}
           {viewMode === 'month' && (
             <MonthViewCalendar
               currentDate={currentDate}
@@ -1327,7 +1885,6 @@
             />
           )}
 
-          {/* Event Creation/Edit Modal */}
           {isEventModalOpen && (
             <EventModalStandalone
               isOpen={isEventModalOpen}
@@ -1354,7 +1911,7 @@
       );
     }
 
-    // --- MONTH VIEW SUB-COMPONENT ---
+    // --- SUB-VIEW: MONTH ---
     function MonthViewCalendar({ currentDate, events, onSelectEvent, onAddNew, onUpdateEvent }) {
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth();
@@ -1386,7 +1943,6 @@
 
       const allDays = [...prevDays, ...currDays, ...nextDays];
       const today = new Date();
-
       const pad = n => String(n).padStart(2, '0');
 
       return (
@@ -1458,7 +2014,7 @@
       );
     }
 
-    // --- WEEK VIEW SUB-COMPONENT ---
+    // --- SUB-VIEW: WEEK ---
     function WeekViewCalendar({ currentDate, events, onSelectEvent, onAddNew, onUpdateEvent }) {
       const getMonday = (d) => {
         const date = new Date(d);
@@ -1476,7 +2032,6 @@
       const hours = Array.from({ length: 24 }, (_, i) => i);
       const pad = n => String(n).padStart(2, '0');
       const today = new Date();
-
       const isSameDay = (d1, d2) => d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
 
       return (
@@ -1559,7 +2114,7 @@
       );
     }
 
-    // --- DAY VIEW SUB-COMPONENT ---
+    // --- SUB-VIEW: DAY ---
     function DayViewCalendar({ currentDate, events, onSelectEvent, onAddNew, onLinkPomodoro }) {
       const pad = n => String(n).padStart(2, '0');
       const dateStr = `${currentDate.getFullYear()}-${pad(currentDate.getMonth() + 1)}-${pad(currentDate.getDate())}`;
@@ -1619,7 +2174,7 @@
       );
     }
 
-    // --- AGENDA VIEW SUB-COMPONENT ---
+    // --- SUB-VIEW: AGENDA ---
     function AgendaViewCalendar({ events, onSelectEvent, onAddNew, onLinkPomodoro }) {
       const sorted = [...events].sort((a, b) => new Date(a.start) - new Date(b.start));
       const grouped = {};
