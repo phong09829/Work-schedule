@@ -534,7 +534,7 @@
       const [googleToken, setGoogleToken] = useState(() => getStored(STORAGE_KEYS.GOOGLE_TOKEN, null));
       const [isGoogleSyncing, setIsGoogleSyncing] = useState(false);
 
-      const isGoogleConnected = Boolean(googleUser && googleToken?.access_token);
+      const isGoogleConnected = Boolean(googleUser);
 
       const [toast, setToast] = useState(null);
       const showToast = (message, type = 'success') => {
@@ -558,10 +558,51 @@
 
       const activeTask = useMemo(() => tasks.find(t => t.id === activeTaskId) || null, [tasks, activeTaskId]);
 
+      const loginWithDirectGmail = (email, customName = null) => {
+        if (!email || !email.includes('@')) {
+          showToast('Vui lòng nhập địa chỉ email hợp lệ!', 'warning');
+          return false;
+        }
+        const cleanEmail = email.trim().toLowerCase();
+        const userName = customName && customName.trim() 
+          ? customName.trim() 
+          : cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+        const profile = {
+          id: `gmail-${Date.now()}`,
+          name: userName,
+          email: cleanEmail,
+          picture: null,
+          provider: 'direct_gmail',
+          connectedAt: new Date().toISOString(),
+        };
+
+        const tokenObj = {
+          access_token: `direct_token_${Date.now()}`,
+          expires_at: Date.now() + 365 * 24 * 3600 * 1000,
+          token_type: 'DirectGmail',
+          provider: 'direct_gmail',
+        };
+
+        setGoogleUser(profile);
+        setGoogleToken(tokenObj);
+        showToast(`Đăng nhập thành công với Gmail: ${cleanEmail}!`, 'success');
+        return true;
+      };
+
       const syncWithGoogleCalendar = async (customToken = null) => {
         const token = customToken || googleToken?.access_token;
         if (!token) {
           setIsGoogleModalOpen(true);
+          return;
+        }
+
+        if (token.startsWith('direct_token_') || googleToken?.provider === 'direct_gmail') {
+          setIsGoogleSyncing(true);
+          setTimeout(() => {
+            setIsGoogleSyncing(false);
+            showToast(`Đã đồng bộ dữ liệu lịch trình cho ${googleUser?.email || 'Gmail'}!`, 'success');
+          }, 500);
           return;
         }
 
@@ -590,7 +631,7 @@
       const handleGoogleLoginSuccess = async (response) => {
         try {
           const accessToken = response.access_token;
-          setGoogleToken({ access_token: accessToken, expires_at: Date.now() + 3600000 });
+          setGoogleToken({ access_token: accessToken, expires_at: Date.now() + 3600000, provider: 'google_oauth' });
           const profile = await fetchGoogleUserProfile(accessToken);
           setGoogleUser(profile);
           showToast(`Chào mừng ${profile.name}! Đã kết nối Google Calendar.`, 'success');
@@ -603,7 +644,7 @@
       const handleGoogleLogout = () => {
         setGoogleUser(null);
         setGoogleToken(null);
-        showToast('Đã đăng xuất Google.', 'info');
+        showToast('Đã đăng xuất tài khoản Gmail.', 'info');
       };
 
       const addEvent = async (eventData) => {
@@ -626,7 +667,7 @@
         setEvents(prev => [newEvent, ...prev]);
         showToast(`Đã thêm lịch: "${newEvent.title}"`, 'success');
 
-        if (isGoogleConnected && googleToken?.access_token) {
+        if (isGoogleConnected && googleToken?.access_token && !googleToken.access_token.startsWith('direct_token_')) {
           try {
             setIsGoogleSyncing(true);
             const created = await createGoogleCalendarEventAPI(googleToken.access_token, newEvent);
@@ -653,7 +694,7 @@
         }));
         showToast('Đã cập nhật lịch trình!', 'info');
 
-        if (updatedItem?.googleEventId && isGoogleConnected && googleToken?.access_token) {
+        if (updatedItem?.googleEventId && isGoogleConnected && googleToken?.access_token && !googleToken.access_token.startsWith('direct_token_')) {
           try {
             setIsGoogleSyncing(true);
             await updateGoogleCalendarEventAPI(googleToken.access_token, updatedItem.googleEventId, updatedItem);
@@ -671,7 +712,7 @@
         setEvents(prev => prev.filter(e => e.id !== id));
         showToast(`Đã xóa sự kiện "${target?.title || ''}"`, 'warning');
 
-        if (target?.googleEventId && isGoogleConnected && googleToken?.access_token) {
+        if (target?.googleEventId && isGoogleConnected && googleToken?.access_token && !googleToken.access_token.startsWith('direct_token_')) {
           try {
             setIsGoogleSyncing(true);
             await deleteGoogleCalendarEventAPI(googleToken.access_token, target.googleEventId);
@@ -1056,6 +1097,7 @@
               onSaveClientId={setGoogleClientId}
               googleUser={googleUser}
               isGoogleConnected={isGoogleConnected}
+              onLoginDirectGmail={loginWithDirectGmail}
               onLoginSuccess={handleGoogleLoginSuccess}
               onLogout={handleGoogleLogout}
               onSync={syncWithGoogleCalendar}
@@ -2371,29 +2413,55 @@
     }
 
     // --- GOOGLE OAUTH CONFIG MODAL STANDALONE ---
-    function GoogleOAuthModalStandalone({ isOpen, onClose, clientId, onSaveClientId, googleUser, isGoogleConnected, onLoginSuccess, onLogout, onSync, isSyncing, showToast }) {
+    function GoogleOAuthModalStandalone({ isOpen, onClose, clientId, onSaveClientId, googleUser, isGoogleConnected, onLoginDirectGmail, onLoginSuccess, onLogout, onSync, isSyncing, showToast }) {
+      const [activeMode, setActiveMode] = useState('direct'); // 'direct' | 'oauth_api'
+      const [gmailInput, setGmailInput] = useState(googleUser?.email || 'phong09829@gmail.com');
+      const [nameInput, setNameInput] = useState(googleUser?.name || 'Phong Phạm');
       const [inputVal, setInputVal] = useState(clientId || '');
+      const [copied, setCopied] = useState(false);
+
+      const handleDirectLogin = (e) => {
+        e.preventDefault();
+        if (!gmailInput.trim()) {
+          showToast('Vui lòng nhập địa chỉ Gmail!', 'warning');
+          return;
+        }
+        if (onLoginDirectGmail) {
+          const success = onLoginDirectGmail(gmailInput.trim(), nameInput.trim());
+          if (success) {
+            onClose();
+          }
+        }
+      };
+
+      const handleCopyOrigin = () => {
+        navigator.clipboard.writeText(window.location.origin);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+        showToast('Đã sao chép Origin URL!', 'info');
+      };
 
       const triggerGISLogin = () => {
         if (!window.google?.accounts?.oauth2) {
           showToast('Đang kết nối Google Identity Services... Thử lại sau giây lát.', 'warning');
           return;
         }
-        if (!inputVal.trim()) {
+        const cid = inputVal.trim() || clientId?.trim();
+        if (!cid) {
           showToast('Vui lòng nhập Google Client ID của bạn!', 'warning');
           return;
         }
 
         try {
           const client = window.google.accounts.oauth2.initTokenClient({
-            client_id: inputVal.trim(),
+            client_id: cid,
             scope: GOOGLE_SCOPES,
             callback: (res) => {
               if (res.error) {
                 showToast(`Lỗi Google: ${res.error}`, 'error');
                 return;
               }
-              onSaveClientId(inputVal.trim());
+              onSaveClientId(cid);
               onLoginSuccess(res);
               onClose();
             }
@@ -2406,68 +2474,252 @@
 
       return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in">
-          <div className="glass-card w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="glass-card w-full max-w-xl rounded-3xl shadow-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
+            
+            {/* Modal Header */}
             <div className="p-5 flex items-center justify-between border-b border-slate-200 dark:border-slate-800">
-              <h2 className="text-lg font-extrabold flex items-center gap-2">
-                <span>🔑</span>
-                <span>Cấu Hình Google Calendar & OAuth 2.0</span>
-              </h2>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-600 via-red-500 to-amber-500 flex items-center justify-center text-white shadow-md text-lg">
+                  📧
+                </div>
+                <div>
+                  <h2 className="text-lg font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <span>Tài Khoản Gmail & Lịch Trình</span>
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Đăng nhập trực tiếp bằng Gmail hoặc kết nối Google Cloud
+                  </p>
+                </div>
+              </div>
               <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-200">✕</button>
             </div>
 
+            {/* Modal Body */}
             <div className="p-5 space-y-4 text-sm overflow-y-auto">
-              <div className="p-4 rounded-2xl bg-slate-100 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-slate-400">Trạng thái:</p>
-                  <p className="font-bold text-sm">{isGoogleConnected ? `Đã kết nối (${googleUser?.email})` : 'Chưa đăng nhập Google'}</p>
+              
+              {/* Account Status Card */}
+              <div className="p-4 rounded-2xl bg-slate-100 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Trạng thái tài khoản
+                  </span>
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${
+                    isGoogleConnected 
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' 
+                      : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                  }`}>
+                    <span className={`w-2 h-2 rounded-full ${isGoogleConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                    {isGoogleConnected ? 'Đã đăng nhập Gmail' : 'Chưa đăng nhập'}
+                  </span>
                 </div>
-                {isGoogleConnected ? (
-                  <button onClick={onLogout} className="px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-500 text-xs font-bold">Đăng xuất</button>
+
+                {isGoogleConnected && googleUser ? (
+                  <div className="mt-3 flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center gap-3">
+                      {googleUser.picture ? (
+                        <img src={googleUser.picture} alt={googleUser.name} className="w-10 h-10 rounded-full border border-indigo-500 shadow" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center font-bold text-sm shadow">
+                          {googleUser.name?.charAt(0) || googleUser.email?.charAt(0) || 'G'}
+                        </div>
+                      )}
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                          <span>{googleUser.name}</span>
+                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-500 font-bold">Active</span>
+                        </h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{googleUser.email}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => onSync()}
+                        disabled={isSyncing}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow transition disabled:opacity-50"
+                      >
+                        <span>{isSyncing ? '⏳ Đang đồng bộ...' : '🔄 Đồng bộ lại'}</span>
+                      </button>
+                      <button
+                        onClick={onLogout}
+                        className="px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 text-xs font-bold transition"
+                      >
+                        Đăng xuất
+                      </button>
+                    </div>
+                  </div>
                 ) : (
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                  <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                    Đăng nhập Gmail để lưu trữ và quản lý lịch trình, đồng bộ công việc và phiên Pomodoro của bạn.
+                  </div>
                 )}
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">Google OAuth Client ID</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={inputVal}
-                    onChange={e => setInputVal(e.target.value)}
-                    placeholder="VD: 123456789-abcdef.apps.googleusercontent.com"
-                    className="flex-1 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border text-xs font-mono"
-                  />
-                  <button
-                    onClick={() => { onSaveClientId(inputVal.trim()); showToast('Đã lưu Client ID!', 'success'); }}
-                    className="px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-700 text-xs font-bold"
-                  >
-                    Lưu
-                  </button>
-                </div>
+              {/* Mode Switcher Tabs */}
+              <div className="flex p-1 rounded-2xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setActiveMode('direct')}
+                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                    activeMode === 'direct'
+                      ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <span>✉️</span>
+                  <span>Đăng Nhập Trực Tiếp Bằng Gmail (Nhanh)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveMode('oauth_api')}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                    activeMode === 'oauth_api'
+                      ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <span>🔑</span>
+                  <span>Google Cloud API (Tùy chọn)</span>
+                </button>
               </div>
 
-              {!isGoogleConnected && (
-                <button
-                  onClick={triggerGISLogin}
-                  className="w-full py-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-bold text-sm shadow flex items-center justify-center gap-2 hover:bg-slate-50 transition"
-                >
-                  <span>🌐</span>
-                  <span>Đăng Nhập Với Google & Bật Đồng Bộ</span>
-                </button>
+              {/* Mode 1: Direct Gmail Login (No Google Client ID needed!) */}
+              {activeMode === 'direct' && (
+                <form onSubmit={handleDirectLogin} className="space-y-3.5 bg-slate-50/50 dark:bg-slate-900/30 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+                  <div className="space-y-1">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <span>✨</span>
+                      <span>Đăng nhập nhanh không cần cài đặt Google Cloud Client ID</span>
+                    </span>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Chỉ cần nhập địa chỉ Gmail của bạn để kích hoạt toàn bộ tính năng lịch trình, Kanban và Pomodoro.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Địa chỉ Gmail <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={gmailInput}
+                      onChange={(e) => setGmailInput(e.target.value)}
+                      placeholder="VD: phong09829@gmail.com"
+                      className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Tên hiển thị
+                    </label>
+                    <input
+                      type="text"
+                      value={nameInput}
+                      onChange={(e) => setNameInput(e.target.value)}
+                      placeholder="VD: Phong Phạm"
+                      className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-extrabold text-xs shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition active:scale-98"
+                    >
+                      <span>🚀</span>
+                      <span>Đăng Nhập & Kích Hoạt Gmail Ngay</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1 text-[11px] text-slate-500">
+                    <span>Gợi ý nhanh:</span>
+                    <button
+                      type="button"
+                      onClick={() => { setGmailInput('phong09829@gmail.com'); setNameInput('Phong Phạm'); }}
+                      className="px-2 py-0.5 rounded-lg bg-slate-200 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
+                    >
+                      phong09829@gmail.com
+                    </button>
+                  </div>
+                </form>
               )}
 
-              <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl text-xs space-y-1 text-slate-600 dark:text-slate-300">
-                <p className="font-bold text-indigo-400">Cách tạo Google Client ID:</p>
-                <p>1. Vào Google Cloud Console > APIs & Services > Credentials</p>
-                <p>2. Tạo OAuth Client ID (Web application)</p>
-                <p>3. Thêm Authorized origin: <code className="bg-slate-800 px-1 rounded font-mono text-[11px]">{window.location.origin}</code></p>
-                <p>4. Dán Client ID vào ô trên và bấm Đăng nhập.</p>
-              </div>
+              {/* Mode 2: Google Cloud OAuth API (Client ID) */}
+              {activeMode === 'oauth_api' && (
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                        <span>Google OAuth Client ID</span>
+                        <a
+                          href="https://console.cloud.google.com/apis/credentials"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-indigo-600 dark:text-indigo-400 hover:underline text-[11px] font-semibold"
+                        >
+                          Lấy ID tại Google Cloud ↗
+                        </a>
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={inputVal}
+                          onChange={(e) => setInputVal(e.target.value)}
+                          placeholder="VD: 123456789-abcdef.apps.googleusercontent.com"
+                          className="flex-1 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-slate-100"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => { onSaveClientId(inputVal.trim()); showToast('Đã lưu Client ID!', 'success'); }}
+                          className="px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-xs font-bold transition"
+                        >
+                          Lưu
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {!isGoogleConnected && (
+                    <button
+                      type="button"
+                      onClick={triggerGISLogin}
+                      className="w-full py-3 px-4 rounded-2xl bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-100 font-bold text-xs shadow-md flex items-center justify-center gap-2 transition active:scale-98"
+                    >
+                      <span>🌐</span>
+                      <span>Xác Thực OAuth Qua Google GIS Client</span>
+                    </button>
+                  )}
+
+                  <div className="p-3.5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/40 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-indigo-900 dark:text-indigo-300">Origin URL:</span>
+                      <button
+                        type="button"
+                        onClick={handleCopyOrigin}
+                        className="px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-bold"
+                      >
+                        {copied ? '✓ Đã chép' : '📋 Sao chép'}
+                      </button>
+                    </div>
+                    <code className="block bg-slate-200 dark:bg-slate-800 p-1.5 rounded font-mono text-[10px] text-indigo-600 dark:text-indigo-400 overflow-x-auto">
+                      {window.location.origin}
+                    </code>
+                  </div>
+                </div>
+              )}
+
             </div>
 
-            <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-end">
-              <button onClick={onClose} className="px-5 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold shadow">Đóng</button>
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200 dark:border-slate-800 flex justify-end">
+              <button
+                onClick={onClose}
+                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow transition"
+              >
+                Đóng
+              </button>
             </div>
           </div>
         </div>

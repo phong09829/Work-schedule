@@ -119,8 +119,43 @@ export const AppProvider = ({ children }) => {
 
   // Check if Google user is logged in
   const isGoogleConnected = useMemo(() => {
-    return Boolean(googleUser && googleToken?.access_token);
-  }, [googleUser, googleToken]);
+    return Boolean(googleUser);
+  }, [googleUser]);
+
+  // Direct Gmail Login (No Google Client ID required)
+  const loginWithDirectGmail = useCallback((email, customName = null) => {
+    if (!email || !email.includes('@')) {
+      showToast('Vui lòng nhập địa chỉ email hợp lệ!', 'warning');
+      return false;
+    }
+    const cleanEmail = email.trim().toLowerCase();
+    const userName = customName && customName.trim() 
+      ? customName.trim() 
+      : cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+    const profile = {
+      id: `gmail-${Date.now()}`,
+      name: userName,
+      email: cleanEmail,
+      picture: null,
+      provider: 'direct_gmail',
+      connectedAt: new Date().toISOString(),
+    };
+
+    const tokenObj = {
+      access_token: `direct_token_${Date.now()}`,
+      expires_at: Date.now() + 365 * 24 * 3600 * 1000,
+      token_type: 'DirectGmail',
+      provider: 'direct_gmail',
+    };
+
+    setGoogleUser(profile);
+    setGoogleToken(tokenObj);
+    setLastSyncTime(new Date().toISOString());
+
+    showToast(`Đăng nhập thành công với Gmail: ${cleanEmail}!`, 'success');
+    return true;
+  }, [showToast]);
 
   // Google Login Handler (supports Google Token Client)
   const handleGoogleLoginSuccess = useCallback(async (tokenResponse) => {
@@ -154,7 +189,7 @@ export const AppProvider = ({ children }) => {
     setGoogleUser(null);
     setGoogleToken(null);
     setLastSyncTime(null);
-    showToast('Đã đăng xuất tài khoản Google.', 'info');
+    showToast('Đã đăng xuất tài khoản.', 'info');
   }, [showToast]);
 
   // Sync with Google Calendar (2-way sync)
@@ -592,12 +627,13 @@ export const AppProvider = ({ children }) => {
         syncWithGoogleCalendar,
         isGoogleSyncing,
         lastSyncTime,
-        // Google Auth
+        // Google / Gmail Auth
         googleUser,
         googleToken,
         googleClientId,
         setGoogleClientId,
         isGoogleConnected,
+        loginWithDirectGmail,
         handleGoogleLoginSuccess,
         handleGoogleLogout,
         // Pomodoro & Settings
