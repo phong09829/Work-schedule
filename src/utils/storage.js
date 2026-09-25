@@ -1,6 +1,8 @@
-// LocalStorage management and initial demo seed data
+// LocalStorage management, multi-account authentication, and isolated user data storage
 
 const STORAGE_KEYS = {
+  USERS: 'focusflow_registered_users_v2',
+  CURRENT_USER: 'focusflow_current_user_v2',
   TASKS: 'focusflow_tasks_v1',
   POMO_SESSIONS: 'focusflow_pomo_sessions_v1',
   SETTINGS: 'focusflow_settings_v1',
@@ -64,7 +66,7 @@ export const DEFAULT_TASKS = [
   }
 ];
 
-// Default default settings
+// Default settings
 export const DEFAULT_SETTINGS = {
   focusDuration: 25, // minutes
   shortBreakDuration: 5, // minutes
@@ -108,10 +110,11 @@ export const generateInitialPomoSessions = () => {
   return sessions;
 };
 
+// Basic storage read/write
 export const getStoredData = (key, fallback) => {
   try {
     const item = localStorage.getItem(key);
-    return item ? JSON.parse(item) : fallback;
+    return item !== null ? JSON.parse(item) : fallback;
   } catch (error) {
     console.warn(`Error reading localStorage key "${key}":`, error);
     return fallback;
@@ -124,6 +127,186 @@ export const setStoredData = (key, value) => {
   } catch (error) {
     console.error(`Error saving to localStorage key "${key}":`, error);
   }
+};
+
+// --- Multi-Account & User-Specific Storage Utilities ---
+
+export const normalizeEmail = (email) => {
+  if (!email || typeof email !== 'string') return '';
+  return email.trim().toLowerCase();
+};
+
+export const getUserStorageKey = (email, dataType) => {
+  const cleanEmail = normalizeEmail(email) || 'guest';
+  const safeEmail = cleanEmail.replace(/[^a-z0-9@._-]/g, '_');
+  return `focusflow_u_${safeEmail}_${dataType}_v2`;
+};
+
+// Retrieve registered user list
+export const getRegisteredUsers = () => {
+  return getStoredData(STORAGE_KEYS.USERS, []);
+};
+
+// Save registered user list
+export const saveRegisteredUsers = (users) => {
+  setStoredData(STORAGE_KEYS.USERS, users);
+};
+
+// Find a user by email (case-insensitive)
+export const findUserByEmail = (email) => {
+  const clean = normalizeEmail(email);
+  if (!clean) return null;
+  const users = getRegisteredUsers();
+  return users.find(u => normalizeEmail(u.email) === clean) || null;
+};
+
+// Get current logged-in user
+export const getCurrentUser = () => {
+  return getStoredData(STORAGE_KEYS.CURRENT_USER, null);
+};
+
+// Set current logged-in user
+export const setCurrentUser = (user) => {
+  if (!user) {
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+  } else {
+    setStoredData(STORAGE_KEYS.CURRENT_USER, user);
+  }
+};
+
+// Register a new user account with 1 unique password per Gmail
+export const registerUserAccount = ({ email, password, name }) => {
+  const cleanEmail = normalizeEmail(email);
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return { ok: false, message: 'Địa chỉ Gmail không hợp lệ! Vui lòng kiểm tra lại.' };
+  }
+  if (!password || password.trim().length < 4) {
+    return { ok: false, message: 'Mật khẩu phải có ít nhất 4 ký tự!' };
+  }
+
+  const existing = findUserByEmail(cleanEmail);
+  if (existing) {
+    return { 
+      ok: false, 
+      errorType: 'EMAIL_EXISTS',
+      message: `Tài khoản Gmail "${cleanEmail}" đã được đăng ký! Vui lòng chuyển sang tab Đăng Nhập.` 
+    };
+  }
+
+  const displayName = name && name.trim()
+    ? name.trim()
+    : cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+  const newUser = {
+    id: `usr-${Date.now()}`,
+    email: cleanEmail,
+    name: displayName,
+    password: password.trim(), // password for this Gmail account
+    avatar: null,
+    createdAt: new Date().toISOString(),
+    lastLogin: new Date().toISOString(),
+  };
+
+  const users = getRegisteredUsers();
+  users.push(newUser);
+  saveRegisteredUsers(users);
+
+  // Set active session
+  const sessionUser = {
+    id: newUser.id,
+    email: newUser.email,
+    name: newUser.name,
+    avatar: newUser.avatar,
+    createdAt: newUser.createdAt,
+  };
+  setCurrentUser(sessionUser);
+
+  return { ok: true, user: sessionUser };
+};
+
+// Log in an existing user with Gmail + Password
+export const loginUserAccount = ({ email, password }) => {
+  const cleanEmail = normalizeEmail(email);
+  if (!cleanEmail) {
+    return { ok: false, message: 'Vui lòng nhập địa chỉ Gmail!' };
+  }
+
+  const user = findUserByEmail(cleanEmail);
+  if (!user) {
+    return { 
+      ok: false, 
+      errorType: 'USER_NOT_FOUND',
+      message: `Tài khoản Gmail "${cleanEmail}" chưa tồn tại trên hệ thống. Vui lòng chọn tab "Đăng Ký Tài Khoản" để tạo mật khẩu!` 
+    };
+  }
+
+  if (user.password !== password?.trim()) {
+    return { 
+      ok: false, 
+      errorType: 'WRONG_PASSWORD',
+      message: 'Mật khẩu không chính xác! Vui lòng thử lại.' 
+    };
+  }
+
+  // Update last login
+  const users = getRegisteredUsers();
+  const updatedUsers = users.map(u => {
+    if (normalizeEmail(u.email) === cleanEmail) {
+      return { ...u, lastLogin: new Date().toISOString() };
+    }
+    return u;
+  });
+  saveRegisteredUsers(updatedUsers);
+
+  const sessionUser = {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    avatar: user.avatar,
+    createdAt: user.createdAt,
+  };
+  setCurrentUser(sessionUser);
+
+  return { ok: true, user: sessionUser };
+};
+
+// Change account password for a Gmail
+export const changeUserPassword = ({ email, oldPassword, newPassword }) => {
+  const cleanEmail = normalizeEmail(email);
+  const user = findUserByEmail(cleanEmail);
+  if (!user) {
+    return { ok: false, message: 'Không tìm thấy thông tin tài khoản!' };
+  }
+
+  if (user.password !== oldPassword?.trim()) {
+    return { ok: false, message: 'Mật khẩu hiện tại không chính xác!' };
+  }
+
+  if (!newPassword || newPassword.trim().length < 4) {
+    return { ok: false, message: 'Mật khẩu mới phải có ít nhất 4 ký tự!' };
+  }
+
+  const users = getRegisteredUsers();
+  const updatedUsers = users.map(u => {
+    if (normalizeEmail(u.email) === cleanEmail) {
+      return { ...u, password: newPassword.trim() };
+    }
+    return u;
+  });
+  saveRegisteredUsers(updatedUsers);
+
+  return { ok: true, message: 'Đổi mật khẩu thành công!' };
+};
+
+// User-specific data helper functions
+export const getUserData = (email, dataType, fallback) => {
+  const key = getUserStorageKey(email, dataType);
+  return getStoredData(key, fallback);
+};
+
+export const setUserData = (email, dataType, value) => {
+  const key = getUserStorageKey(email, dataType);
+  setStoredData(key, value);
 };
 
 export { STORAGE_KEYS };

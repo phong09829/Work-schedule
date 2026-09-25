@@ -224,6 +224,8 @@
 
     // --- Storage Keys & Initial Data ---
     const STORAGE_KEYS = {
+      USERS: 'focusflow_registered_users_v2',
+      CURRENT_USER: 'focusflow_current_user_v2',
       TASKS: 'focusflow_tasks_v1',
       EVENTS: 'focusflow_calendar_events_v1',
       POMO_SESSIONS: 'focusflow_pomo_sessions_v1',
@@ -396,6 +398,112 @@
       } catch (e) {}
     };
 
+    // --- Multi-Account & Isolated User Data Storage ---
+    const normalizeEmail = (email) => {
+      if (!email || typeof email !== 'string') return '';
+      return email.trim().toLowerCase();
+    };
+
+    const getUserStorageKey = (email, dataType) => {
+      const cleanEmail = normalizeEmail(email) || 'guest';
+      const safeEmail = cleanEmail.replace(/[^a-z0-9@._-]/g, '_');
+      return `focusflow_u_${safeEmail}_${dataType}_v2`;
+    };
+
+    const getRegisteredUsers = () => {
+      return getStored(STORAGE_KEYS.USERS, []);
+    };
+
+    const saveRegisteredUsers = (users) => {
+      setStored(STORAGE_KEYS.USERS, users);
+    };
+
+    const findUserByEmail = (email) => {
+      const clean = normalizeEmail(email);
+      if (!clean) return null;
+      const users = getRegisteredUsers();
+      return users.find(u => normalizeEmail(u.email) === clean) || null;
+    };
+
+    const getCurrentUser = () => {
+      return getStored(STORAGE_KEYS.CURRENT_USER, null);
+    };
+
+    const setCurrentUser = (user) => {
+      if (!user) {
+        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      } else {
+        setStored(STORAGE_KEYS.CURRENT_USER, user);
+      }
+    };
+
+    const registerUserAccount = ({ email, password, name }) => {
+      const cleanEmail = normalizeEmail(email);
+      if (!cleanEmail || !cleanEmail.includes('@')) {
+        return { ok: false, message: 'Địa chỉ Gmail không hợp lệ!' };
+      }
+      if (!password || password.trim().length < 4) {
+        return { ok: false, message: 'Mật khẩu phải có ít nhất 4 ký tự!' };
+      }
+      const existing = findUserByEmail(cleanEmail);
+      if (existing) {
+        return { ok: false, errorType: 'EMAIL_EXISTS', message: `Tài khoản Gmail "${cleanEmail}" đã được đăng ký! Vui lòng chọn tab Đăng Nhập.` };
+      }
+      const displayName = name && name.trim() ? name.trim() : cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+      const newUser = {
+        id: `usr-${Date.now()}`,
+        email: cleanEmail,
+        name: displayName,
+        password: password.trim(),
+        createdAt: new Date().toISOString(),
+        lastLogin: new Date().toISOString(),
+      };
+      const users = getRegisteredUsers();
+      users.push(newUser);
+      saveRegisteredUsers(users);
+      const sessionUser = { id: newUser.id, email: newUser.email, name: newUser.name, createdAt: newUser.createdAt };
+      setCurrentUser(sessionUser);
+      return { ok: true, user: sessionUser };
+    };
+
+    const loginUserAccount = ({ email, password }) => {
+      const cleanEmail = normalizeEmail(email);
+      if (!cleanEmail) return { ok: false, message: 'Vui lòng nhập địa chỉ Gmail!' };
+      const user = findUserByEmail(cleanEmail);
+      if (!user) {
+        return { ok: false, errorType: 'USER_NOT_FOUND', message: `Tài khoản "${cleanEmail}" chưa tồn tại. Vui lòng chọn tab "Đăng Ký Tài Khoản" để tạo mật khẩu!` };
+      }
+      if (user.password !== password?.trim()) {
+        return { ok: false, errorType: 'WRONG_PASSWORD', message: 'Mật khẩu không chính xác! Vui lòng thử lại.' };
+      }
+      const users = getRegisteredUsers().map(u => normalizeEmail(u.email) === cleanEmail ? { ...u, lastLogin: new Date().toISOString() } : u);
+      saveRegisteredUsers(users);
+      const sessionUser = { id: user.id, email: user.email, name: user.name, createdAt: user.createdAt };
+      setCurrentUser(sessionUser);
+      return { ok: true, user: sessionUser };
+    };
+
+    const changeUserPassword = ({ email, oldPassword, newPassword }) => {
+      const cleanEmail = normalizeEmail(email);
+      const user = findUserByEmail(cleanEmail);
+      if (!user) return { ok: false, message: 'Không tìm thấy tài khoản!' };
+      if (user.password !== oldPassword?.trim()) return { ok: false, message: 'Mật khẩu hiện tại không chính xác!' };
+      if (!newPassword || newPassword.trim().length < 4) return { ok: false, message: 'Mật khẩu mới phải có ít nhất 4 ký tự!' };
+      const users = getRegisteredUsers().map(u => normalizeEmail(u.email) === cleanEmail ? { ...u, password: newPassword.trim() } : u);
+      saveRegisteredUsers(users);
+      return { ok: true, message: 'Đổi mật khẩu thành công!' };
+    };
+
+    const getUserData = (email, dataType, fallback) => {
+      const key = getUserStorageKey(email, dataType);
+      return getStored(key, fallback);
+    };
+
+    const setUserData = (email, dataType, value) => {
+      const key = getUserStorageKey(email, dataType);
+      setStored(key, value);
+    };
+
     const formatForDateTimeInput = (date) => {
       if (!date) return '';
       const d = typeof date === 'string' ? new Date(date) : date;
@@ -523,10 +631,28 @@
 
       const [activeTab, setActiveTab] = useState('dashboard');
 
-      const [tasks, setTasks] = useState(() => getStored(STORAGE_KEYS.TASKS, DEFAULT_TASKS));
-      const [events, setEvents] = useState(() => getStored(STORAGE_KEYS.EVENTS, DEFAULT_EVENTS));
-      const [pomoSessions, setPomoSessions] = useState(() => getStored(STORAGE_KEYS.POMO_SESSIONS, generateInitialPomoSessions()));
-      const [settings, setSettings] = useState(() => getStored(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS));
+      const [currentUser, setCurrentUserState] = useState(() => getCurrentUser());
+
+      const [tasks, setTasks] = useState(() => {
+        const user = getCurrentUser();
+        if (user && user.email) return getUserData(user.email, 'tasks', DEFAULT_TASKS);
+        return getStored(STORAGE_KEYS.TASKS, DEFAULT_TASKS);
+      });
+      const [events, setEvents] = useState(() => {
+        const user = getCurrentUser();
+        if (user && user.email) return getUserData(user.email, 'events', DEFAULT_EVENTS);
+        return getStored(STORAGE_KEYS.EVENTS, DEFAULT_EVENTS);
+      });
+      const [pomoSessions, setPomoSessions] = useState(() => {
+        const user = getCurrentUser();
+        if (user && user.email) return getUserData(user.email, 'pomo', generateInitialPomoSessions());
+        return getStored(STORAGE_KEYS.POMO_SESSIONS, generateInitialPomoSessions());
+      });
+      const [settings, setSettings] = useState(() => {
+        const user = getCurrentUser();
+        if (user && user.email) return getUserData(user.email, 'settings', DEFAULT_SETTINGS);
+        return getStored(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS);
+      });
       const [activeTaskId, setActiveTaskId] = useState(() => tasks.find(t => t.status === 'in_progress')?.id || tasks[0]?.id || null);
       
       const [googleClientId, setGoogleClientId] = useState(() => getStored(STORAGE_KEYS.GOOGLE_CLIENT_ID, ''));
@@ -535,6 +661,7 @@
       const [isGoogleSyncing, setIsGoogleSyncing] = useState(false);
 
       const isGoogleConnected = Boolean(googleUser);
+      const isAccountLoggedIn = Boolean(currentUser && currentUser.email);
 
       const [toast, setToast] = useState(null);
       const showToast = (message, type = 'success') => {
@@ -548,46 +675,114 @@
       const [defaultStatusForNew, setDefaultStatusForNew] = useState('todo');
       const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
 
-      useEffect(() => setStored(STORAGE_KEYS.TASKS, tasks), [tasks]);
-      useEffect(() => setStored(STORAGE_KEYS.EVENTS, events), [events]);
-      useEffect(() => setStored(STORAGE_KEYS.POMO_SESSIONS, pomoSessions), [pomoSessions]);
-      useEffect(() => setStored(STORAGE_KEYS.SETTINGS, settings), [settings]);
+      // Persistence
+      useEffect(() => {
+        if (currentUser?.email) setUserData(currentUser.email, 'tasks', tasks);
+        setStored(STORAGE_KEYS.TASKS, tasks);
+      }, [tasks, currentUser]);
+
+      useEffect(() => {
+        if (currentUser?.email) setUserData(currentUser.email, 'events', events);
+        setStored(STORAGE_KEYS.EVENTS, events);
+      }, [events, currentUser]);
+
+      useEffect(() => {
+        if (currentUser?.email) setUserData(currentUser.email, 'pomo', pomoSessions);
+        setStored(STORAGE_KEYS.POMO_SESSIONS, pomoSessions);
+      }, [pomoSessions, currentUser]);
+
+      useEffect(() => {
+        if (currentUser?.email) setUserData(currentUser.email, 'settings', settings);
+        setStored(STORAGE_KEYS.SETTINGS, settings);
+      }, [settings, currentUser]);
+
       useEffect(() => setStored(STORAGE_KEYS.GOOGLE_CLIENT_ID, googleClientId), [googleClientId]);
       useEffect(() => setStored(STORAGE_KEYS.GOOGLE_USER, googleUser), [googleUser]);
       useEffect(() => setStored(STORAGE_KEYS.GOOGLE_TOKEN, googleToken), [googleToken]);
 
       const activeTask = useMemo(() => tasks.find(t => t.id === activeTaskId) || null, [tasks, activeTaskId]);
 
+      // Multi-Account Authentication Methods
+      const registerAccount = ({ email, password, name }) => {
+        const res = registerUserAccount({ email, password, name });
+        if (!res.ok) {
+          showToast(res.message, 'error');
+          return res;
+        }
+        const newUser = res.user;
+        setCurrentUserState(newUser);
+        const existingEvents = getUserData(newUser.email, 'events', null);
+        if (!existingEvents) {
+          setUserData(newUser.email, 'events', events);
+          setUserData(newUser.email, 'tasks', tasks);
+          setUserData(newUser.email, 'pomo', pomoSessions);
+          setUserData(newUser.email, 'settings', settings);
+        } else {
+          setEvents(existingEvents);
+          setTasks(getUserData(newUser.email, 'tasks', DEFAULT_TASKS));
+          setPomoSessions(getUserData(newUser.email, 'pomo', generateInitialPomoSessions()));
+          setSettings(getUserData(newUser.email, 'settings', DEFAULT_SETTINGS));
+        }
+        showToast(`Đăng ký thành công! Lịch trình của ${newUser.email} đã được bảo vệ bằng mật khẩu.`, 'success');
+        return res;
+      };
+
+      const loginAccount = ({ email, password }) => {
+        const res = loginUserAccount({ email, password });
+        if (!res.ok) {
+          showToast(res.message, 'error');
+          return res;
+        }
+        const user = res.user;
+        setCurrentUserState(user);
+        const userEvents = getUserData(user.email, 'events', DEFAULT_EVENTS);
+        const userTasks = getUserData(user.email, 'tasks', DEFAULT_TASKS);
+        const userPomo = getUserData(user.email, 'pomo', generateInitialPomoSessions());
+        const userSettings = getUserData(user.email, 'settings', DEFAULT_SETTINGS);
+
+        setEvents(userEvents);
+        setTasks(userTasks);
+        setPomoSessions(userPomo);
+        setSettings(userSettings);
+        showToast(`Đăng nhập thành công! Đã tải ${userEvents.length} lịch trình của ${user.name || user.email}`, 'success');
+        return res;
+      };
+
+      const changeAccountPassword = ({ oldPassword, newPassword }) => {
+        if (!currentUser?.email) {
+          showToast('Vui lòng đăng nhập trước khi đổi mật khẩu!', 'warning');
+          return { ok: false };
+        }
+        const res = changeUserPassword({ email: currentUser.email, oldPassword, newPassword });
+        if (res.ok) {
+          showToast('Đổi mật khẩu thành công!', 'success');
+        } else {
+          showToast(res.message, 'error');
+        }
+        return res;
+      };
+
+      const logoutAccount = () => {
+        setCurrentUser(null);
+        setCurrentUserState(null);
+        setGoogleUser(null);
+        setGoogleToken(null);
+        showToast('Đã đăng xuất tài khoản.', 'info');
+      };
+
       const loginWithDirectGmail = (email, customName = null) => {
         if (!email || !email.includes('@')) {
           showToast('Vui lòng nhập địa chỉ email hợp lệ!', 'warning');
           return false;
         }
-        const cleanEmail = email.trim().toLowerCase();
-        const userName = customName && customName.trim() 
-          ? customName.trim() 
-          : cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-
-        const profile = {
-          id: `gmail-${Date.now()}`,
-          name: userName,
-          email: cleanEmail,
-          picture: null,
-          provider: 'direct_gmail',
-          connectedAt: new Date().toISOString(),
-        };
-
-        const tokenObj = {
-          access_token: `direct_token_${Date.now()}`,
-          expires_at: Date.now() + 365 * 24 * 3600 * 1000,
-          token_type: 'DirectGmail',
-          provider: 'direct_gmail',
-        };
-
-        setGoogleUser(profile);
-        setGoogleToken(tokenObj);
-        showToast(`Đăng nhập thành công với Gmail: ${cleanEmail}!`, 'success');
-        return true;
+        const cleanEmail = normalizeEmail(email);
+        const user = findUserByEmail(cleanEmail);
+        if (user) {
+          showToast(`Tài khoản "${cleanEmail}" đã có mật khẩu. Vui lòng nhập mật khẩu để đăng nhập!`, 'warning');
+          return false;
+        }
+        const res = registerAccount({ email: cleanEmail, password: 'password123', name: customName });
+        return res.ok;
       };
 
       const syncWithGoogleCalendar = async (customToken = null) => {
@@ -662,9 +857,14 @@
           isGoogleEvent: false,
           googleEventId: null,
           synced: true,
+          userEmail: currentUser?.email || 'guest',
         };
 
-        setEvents(prev => [newEvent, ...prev]);
+        setEvents(prev => {
+          const updated = [newEvent, ...prev];
+          if (currentUser?.email) setUserData(currentUser.email, 'events', updated);
+          return updated;
+        });
         showToast(`Đã thêm lịch: "${newEvent.title}"`, 'success');
 
         if (isGoogleConnected && googleToken?.access_token && !googleToken.access_token.startsWith('direct_token_')) {
@@ -672,7 +872,11 @@
             setIsGoogleSyncing(true);
             const created = await createGoogleCalendarEventAPI(googleToken.access_token, newEvent);
             if (created?.id) {
-              setEvents(prev => prev.map(e => e.id === newEvent.id ? { ...e, googleEventId: created.id, isGoogleEvent: true } : e));
+              setEvents(prev => {
+                const updated = prev.map(e => e.id === newEvent.id ? { ...e, googleEventId: created.id, isGoogleEvent: true } : e);
+                if (currentUser?.email) setUserData(currentUser.email, 'events', updated);
+                return updated;
+              });
               showToast('Đã đồng bộ ngay lên Google Calendar!', 'success');
             }
           } catch(e) {
@@ -685,14 +889,18 @@
 
       const updateEvent = async (id, fields) => {
         let updatedItem = null;
-        setEvents(prev => prev.map(e => {
-          if (e.id === id) {
-            updatedItem = { ...e, ...fields };
-            return updatedItem;
-          }
-          return e;
-        }));
-        showToast('Đã cập nhật lịch trình!', 'info');
+        setEvents(prev => {
+          const updated = prev.map(e => {
+            if (e.id === id) {
+              updatedItem = { ...e, ...fields };
+              return updatedItem;
+            }
+            return e;
+          });
+          if (currentUser?.email) setUserData(currentUser.email, 'events', updated);
+          return updated;
+        });
+        showToast('Đã lưu chỉnh sửa lịch trình!', 'info');
 
         if (updatedItem?.googleEventId && isGoogleConnected && googleToken?.access_token && !googleToken.access_token.startsWith('direct_token_')) {
           try {
@@ -709,7 +917,11 @@
 
       const deleteEvent = async (id) => {
         const target = events.find(e => e.id === id);
-        setEvents(prev => prev.filter(e => e.id !== id));
+        setEvents(prev => {
+          const updated = prev.filter(e => e.id !== id);
+          if (currentUser?.email) setUserData(currentUser.email, 'events', updated);
+          return updated;
+        });
         showToast(`Đã xóa sự kiện "${target?.title || ''}"`, 'warning');
 
         if (target?.googleEventId && isGoogleConnected && googleToken?.access_token && !googleToken.access_token.startsWith('direct_token_')) {
@@ -938,19 +1150,24 @@
                   <button
                     onClick={() => setIsGoogleModalOpen(true)}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
-                      isGoogleConnected
-                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-                        : 'bg-slate-200/60 dark:bg-slate-800/60 border-slate-300/60 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                      isAccountLoggedIn
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-300'
+                        : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white border-transparent hover:from-indigo-500 hover:to-purple-500 shadow-md'
                     }`}
                   >
-                    {isGoogleConnected && googleUser?.picture ? (
-                      <img src={googleUser.picture} className="w-4 h-4 rounded-full" alt="" />
+                    {isAccountLoggedIn ? (
+                      <>
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="hidden sm:inline">
+                          {currentUser?.name?.split(' ')[0] || currentUser?.email?.split('@')[0]}
+                        </span>
+                      </>
                     ) : (
-                      <span className={`w-2 h-2 rounded-full ${isGoogleConnected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                      <>
+                        <span>🔒</span>
+                        <span>Đăng Nhập Gmail</span>
+                      </>
                     )}
-                    <span className="hidden sm:inline">
-                      {isGoogleConnected ? (googleUser?.name?.split(' ')[0] || 'Google') : 'Google Sync'}
-                    </span>
                   </button>
 
                   <div title={`Chuỗi ${streakDays} ngày liên tục`} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold select-none">
@@ -1013,6 +1230,8 @@
             {activeTab === 'calendar' && (
               <CalendarViewStandalone
                 events={events}
+                currentUser={currentUser}
+                isAccountLoggedIn={isAccountLoggedIn}
                 onAddEvent={addEvent}
                 onUpdateEvent={updateEvent}
                 onDeleteEvent={deleteEvent}
@@ -1093,13 +1312,20 @@
             <GoogleOAuthModalStandalone
               isOpen={isGoogleModalOpen}
               onClose={() => setIsGoogleModalOpen(false)}
+              currentUser={currentUser}
+              isAccountLoggedIn={isAccountLoggedIn}
+              onRegisterAccount={registerAccount}
+              onLoginAccount={loginAccount}
+              onChangePassword={changeAccountPassword}
+              onLogoutAccount={logoutAccount}
+              events={events}
+              tasks={tasks}
+              pomoSessions={pomoSessions}
               clientId={googleClientId}
               onSaveClientId={setGoogleClientId}
               googleUser={googleUser}
               isGoogleConnected={isGoogleConnected}
-              onLoginDirectGmail={loginWithDirectGmail}
               onLoginSuccess={handleGoogleLoginSuccess}
-              onLogout={handleGoogleLogout}
               onSync={syncWithGoogleCalendar}
               isSyncing={isGoogleSyncing}
               showToast={showToast}
@@ -1111,6 +1337,9 @@
               isOpen={isSettingsOpen}
               onClose={() => setIsSettingsOpen(false)}
               settings={settings}
+              currentUser={currentUser}
+              isAccountLoggedIn={isAccountLoggedIn}
+              onLogoutAccount={logoutAccount}
               onSave={(newSettings) => {
                 setSettings(newSettings);
                 setIsSettingsOpen(false);
@@ -1741,7 +1970,7 @@
     }
 
     // --- 4. CALENDAR VIEW STANDALONE ---
-    function CalendarViewStandalone({ events, onAddEvent, onUpdateEvent, onDeleteEvent, onLinkPomodoro, isGoogleConnected, isGoogleSyncing, onSyncGoogle, onOpenGoogleConfig }) {
+    function CalendarViewStandalone({ events, currentUser, isAccountLoggedIn, onAddEvent, onUpdateEvent, onDeleteEvent, onLinkPomodoro, isGoogleConnected, isGoogleSyncing, onSyncGoogle, onOpenGoogleConfig }) {
       const [currentDate, setCurrentDate] = useState(new Date());
       const [viewMode, setViewMode] = useState('month');
       const [searchQuery, setSearchQuery] = useState('');
@@ -1790,7 +2019,7 @@
       }, [currentDate, viewMode]);
 
       return (
-        <div className="space-y-6 animate-fade-in pb-12">
+        <div className="space-y-5 animate-fade-in pb-12">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div>
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight flex items-center gap-2.5">
@@ -1798,10 +2027,12 @@
                 <span>Lịch Trình & Google Schedule</span>
               </h1>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-2">
-                <span>Đồng bộ 2 chiều thời gian thực với Google Calendar API</span>
-                <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${isGoogleConnected ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'}`}>
-                  {isGoogleConnected ? '● Đã kết nối Google' : '○ Offline'}
-                </span>
+                <span>Tự động lưu lại mọi chỉnh sửa sự kiện theo tài khoản Gmail</span>
+                {isGoogleConnected && (
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    ● Google Sync Active
+                  </span>
+                )}
               </p>
             </div>
 
@@ -1819,8 +2050,8 @@
                 onClick={onOpenGoogleConfig}
                 className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-bold text-xs shadow-sm hover:bg-slate-50 transition"
               >
-                <span>🔑</span>
-                <span>Cài đặt OAuth</span>
+                <span>{isAccountLoggedIn ? '🛡️' : '🔒'}</span>
+                <span>{isAccountLoggedIn ? (currentUser?.name?.split(' ')[0] || 'Tài khoản') : 'Đăng Nhập Gmail'}</span>
               </button>
 
               <button
@@ -1831,6 +2062,39 @@
                 <span>Thêm Sự Kiện</span>
               </button>
             </div>
+          </div>
+
+          {/* Account Schedule Banner */}
+          <div className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs ${
+            isAccountLoggedIn
+              ? 'bg-emerald-50/70 dark:bg-emerald-950/25 border-emerald-200/80 dark:border-emerald-900/40 text-emerald-900 dark:text-emerald-200'
+              : 'bg-amber-50/70 dark:bg-amber-950/25 border-amber-200/80 dark:border-amber-900/40 text-amber-900 dark:text-amber-200'
+          }`}>
+            <div className="flex items-center gap-2.5">
+              <span className="text-base">{isAccountLoggedIn ? '🛡️' : '💡'}</span>
+              <div>
+                {isAccountLoggedIn ? (
+                  <span>
+                    Đang lưu trữ lịch trình cho tài khoản: <strong className="font-bold text-emerald-700 dark:text-emerald-300 font-mono">{currentUser?.email}</strong>. Mọi chỉnh sửa được lưu vĩnh viễn và an toàn.
+                  </span>
+                ) : (
+                  <span>
+                    Bạn đang ở chế độ khách. Hãy <strong className="font-bold">Đăng nhập Gmail có mật khẩu</strong> để mỗi tài khoản có 1 mật khẩu riêng và lưu lại toàn bộ sự kiện đã điền!
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <button
+              onClick={onOpenGoogleConfig}
+              className={`px-3 py-1.5 rounded-xl font-bold transition shrink-0 ${
+                isAccountLoggedIn
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
+                  : 'bg-amber-600 hover:bg-amber-500 text-white shadow-sm'
+              }`}
+            >
+              {isAccountLoggedIn ? 'Đổi Mật Khẩu / Tài Khoản' : 'Đăng Nhập / Đăng Ký Ngay'}
+            </button>
           </div>
 
           {/* Controls */}
@@ -1932,6 +2196,7 @@
               isOpen={isEventModalOpen}
               onClose={() => setIsEventModalOpen(false)}
               eventToEdit={eventToEdit}
+              currentUser={currentUser}
               initialDate={slotDate}
               initialHour={slotHour}
               onSave={(evtData) => {
@@ -2278,7 +2543,7 @@
     }
 
     // --- EVENT MODAL STANDALONE ---
-    function EventModalStandalone({ isOpen, onClose, eventToEdit, initialDate, initialHour = 9, onSave, onDelete, onLinkPomodoro }) {
+    function EventModalStandalone({ isOpen, onClose, eventToEdit, currentUser, initialDate, initialHour = 9, onSave, onDelete, onLinkPomodoro }) {
       const [title, setTitle] = useState(eventToEdit?.title || '');
       const [description, setDescription] = useState(eventToEdit?.description || '');
       const [location, setLocation] = useState(eventToEdit?.location || '');
@@ -2313,9 +2578,31 @@
       return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in">
           <div className="glass-card w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="h-2 w-full" style={{ backgroundColor: color }} />
+            <div className="h-2 w-full transition-colors duration-300" style={{ backgroundColor: color }} />
+            
             <div className="p-5 flex items-center justify-between border-b border-slate-200 dark:border-slate-800">
-              <h2 className="text-lg font-extrabold">{eventToEdit ? 'Chỉnh Sửa Sự Kiện' : 'Thêm Lịch Trình Mới'}</h2>
+              <div className="flex items-center gap-3">
+                <div 
+                  className="w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-md font-bold text-lg"
+                  style={{ backgroundColor: color }}
+                >
+                  📅
+                </div>
+                <div>
+                  <h2 className="text-lg font-extrabold text-slate-900 dark:text-slate-100">
+                    {eventToEdit ? 'Chỉnh Sửa Sự Kiện' : 'Thêm Lịch Trình Mới'}
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-0.5">
+                    {currentUser?.email ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold font-mono">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Lưu vào tài khoản: {currentUser.email}
+                      </span>
+                    ) : (
+                      <span>Lưu trữ nội bộ • Đăng nhập để lưu vào tài khoản Gmail</span>
+                    )}
+                  </p>
+                </div>
+              </div>
               <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-200">✕</button>
             </div>
 
@@ -2327,30 +2614,30 @@
                   required
                   value={title}
                   onChange={e => setTitle(e.target.value)}
-                  placeholder="VD: Họp định kỳ, Học React..."
-                  className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-semibold"
+                  placeholder="VD: Họp định kỳ, Học React, Đi công tác..."
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-semibold text-xs text-slate-900 dark:text-slate-100"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Bắt đầu</label>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Bắt đầu</label>
                   <input
                     type="datetime-local"
                     required
                     value={startDateTime}
                     onChange={e => setStartDateTime(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border text-xs"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Kết thúc</label>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Kết thúc</label>
                   <input
                     type="datetime-local"
                     required
                     value={endDateTime}
                     onChange={e => setEndDateTime(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border text-xs"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100"
                   />
                 </div>
               </div>
@@ -2363,7 +2650,7 @@
                       key={c.id}
                       type="button"
                       onClick={() => { setCategory(c.id); setColor(c.color); }}
-                      className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 ${
+                      className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition ${
                         category === c.id ? 'border-indigo-500 bg-indigo-500/10 text-indigo-500' : 'border-slate-200 dark:border-slate-700 text-slate-400'
                       }`}
                     >
@@ -2375,35 +2662,44 @@
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Địa điểm / Google Meet</label>
+                <label className="block text-xs font-bold text-slate-400 mb-1">Địa điểm / Google Meet</label>
                 <input
                   type="text"
                   value={location}
                   onChange={e => setLocation(e.target.value)}
                   placeholder="VD: Phòng họp 201, Google Meet..."
-                  className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border text-xs"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Mô tả / Ghi chú</label>
+                <label className="block text-xs font-bold text-slate-400 mb-1">Mô tả / Ghi chú</label>
                 <textarea
                   rows={2}
                   value={description}
                   onChange={e => setDescription(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border text-xs"
+                  placeholder="Thêm mô tả chi tiết cho lịch trình..."
+                  className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100"
                 />
               </div>
 
               <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-800">
                 {eventToEdit ? (
-                  <button type="button" onClick={() => onDelete(eventToEdit.id)} className="text-rose-500 text-xs font-bold">
-                    🗑️ Xóa sự kiện
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(`Bạn có chắc chắn muốn xóa sự kiện "${eventToEdit.title}"?`)) {
+                        onDelete(eventToEdit.id);
+                      }
+                    }}
+                    className="text-rose-500 hover:text-rose-600 text-xs font-bold flex items-center gap-1"
+                  >
+                    <span>🗑️ Xóa sự kiện</span>
                   </button>
                 ) : <div />}
                 <div className="flex gap-2">
                   <button type="button" onClick={onClose} className="px-4 py-2 text-xs font-medium">Hủy</button>
-                  <button type="submit" className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-lg">Lưu Sự Kiện</button>
+                  <button type="submit" className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-lg shadow-indigo-500/25">Lưu Sự Kiện</button>
                 </div>
               </div>
             </form>
@@ -2412,25 +2708,125 @@
       );
     }
 
-    // --- GOOGLE OAUTH CONFIG MODAL STANDALONE ---
-    function GoogleOAuthModalStandalone({ isOpen, onClose, clientId, onSaveClientId, googleUser, isGoogleConnected, onLoginDirectGmail, onLoginSuccess, onLogout, onSync, isSyncing, showToast }) {
-      const [activeMode, setActiveMode] = useState('direct'); // 'direct' | 'oauth_api'
-      const [gmailInput, setGmailInput] = useState(googleUser?.email || 'phong09829@gmail.com');
-      const [nameInput, setNameInput] = useState(googleUser?.name || 'Phong Phạm');
+    // --- GOOGLE OAUTH & ACCOUNT CONFIG MODAL STANDALONE ---
+    function GoogleOAuthModalStandalone({
+      isOpen,
+      onClose,
+      currentUser,
+      isAccountLoggedIn,
+      onRegisterAccount,
+      onLoginAccount,
+      onChangePassword,
+      onLogoutAccount,
+      events = [],
+      tasks = [],
+      pomoSessions = [],
+      clientId,
+      onSaveClientId,
+      googleUser,
+      isGoogleConnected,
+      onLoginSuccess,
+      onSync,
+      isSyncing,
+      showToast
+    }) {
+      const [activeTab, setActiveTab] = useState(isAccountLoggedIn ? 'profile' : 'login');
+
+      // Login Form State
+      const [loginEmail, setLoginEmail] = useState('');
+      const [loginPassword, setLoginPassword] = useState('');
+      const [showLoginPassword, setShowLoginPassword] = useState(false);
+
+      // Register Form State
+      const [regName, setRegName] = useState('');
+      const [regEmail, setRegEmail] = useState('');
+      const [regPassword, setRegPassword] = useState('');
+      const [regConfirmPassword, setRegConfirmPassword] = useState('');
+      const [showRegPassword, setShowRegPassword] = useState(false);
+
+      // Change Password Form State
+      const [oldPassword, setOldPassword] = useState('');
+      const [newPassword, setNewPassword] = useState('');
+      const [confirmNewPassword, setConfirmNewPassword] = useState('');
+      const [showChangePassword, setShowChangePassword] = useState(false);
+
+      // Google OAuth API State
       const [inputVal, setInputVal] = useState(clientId || '');
       const [copied, setCopied] = useState(false);
 
-      const handleDirectLogin = (e) => {
+      const handleLoginSubmit = (e) => {
         e.preventDefault();
-        if (!gmailInput.trim()) {
+        if (!loginEmail.trim()) {
           showToast('Vui lòng nhập địa chỉ Gmail!', 'warning');
           return;
         }
-        if (onLoginDirectGmail) {
-          const success = onLoginDirectGmail(gmailInput.trim(), nameInput.trim());
-          if (success) {
-            onClose();
-          }
+        if (!loginPassword) {
+          showToast('Vui lòng nhập mật khẩu tài khoản!', 'warning');
+          return;
+        }
+
+        const res = onLoginAccount ? onLoginAccount({
+          email: loginEmail.trim(),
+          password: loginPassword,
+        }) : { ok: false };
+
+        if (res && res.ok) {
+          setActiveTab('profile');
+          onClose();
+        }
+      };
+
+      const handleRegisterSubmit = (e) => {
+        e.preventDefault();
+        if (!regEmail.trim() || !regEmail.includes('@')) {
+          showToast('Vui lòng nhập địa chỉ Gmail hợp lệ!', 'warning');
+          return;
+        }
+        if (!regPassword || regPassword.length < 4) {
+          showToast('Mật khẩu phải có ít nhất 4 ký tự!', 'warning');
+          return;
+        }
+        if (regPassword !== regConfirmPassword) {
+          showToast('Mật khẩu xác nhận không khớp! Vui lòng nhập lại.', 'warning');
+          return;
+        }
+
+        const res = onRegisterAccount ? onRegisterAccount({
+          email: regEmail.trim(),
+          password: regPassword,
+          name: regName.trim(),
+        }) : { ok: false };
+
+        if (res && res.ok) {
+          setActiveTab('profile');
+          onClose();
+        }
+      };
+
+      const handleChangePasswordSubmit = (e) => {
+        e.preventDefault();
+        if (!oldPassword) {
+          showToast('Vui lòng nhập mật khẩu hiện tại!', 'warning');
+          return;
+        }
+        if (!newPassword || newPassword.length < 4) {
+          showToast('Mật khẩu mới phải có ít nhất 4 ký tự!', 'warning');
+          return;
+        }
+        if (newPassword !== confirmNewPassword) {
+          showToast('Xác nhận mật khẩu mới không khớp!', 'warning');
+          return;
+        }
+
+        const res = onChangePassword ? onChangePassword({
+          oldPassword,
+          newPassword,
+        }) : { ok: false };
+
+        if (res && res.ok) {
+          setOldPassword('');
+          setNewPassword('');
+          setConfirmNewPassword('');
         }
       };
 
@@ -2462,7 +2858,7 @@
                 return;
               }
               onSaveClientId(cid);
-              onLoginSuccess(res);
+              if (onLoginSuccess) onLoginSuccess(res);
               onClose();
             }
           });
@@ -2473,182 +2869,439 @@
       };
 
       return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-md animate-fade-in">
           <div className="glass-card w-full max-w-xl rounded-3xl shadow-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
             
             {/* Modal Header */}
-            <div className="p-5 flex items-center justify-between border-b border-slate-200 dark:border-slate-800">
+            <div className="p-5 sm:p-6 flex items-center justify-between border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-600 via-red-500 to-amber-500 flex items-center justify-center text-white shadow-md text-lg">
-                  📧
+                <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/25 text-xl">
+                  🛡️
                 </div>
                 <div>
                   <h2 className="text-lg font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                    <span>Tài Khoản Gmail & Lịch Trình</span>
+                    <span>Tài Khoản Gmail & Bảo Mật Lịch Trình</span>
                   </h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Đăng nhập trực tiếp bằng Gmail hoặc kết nối Google Cloud
+                    Mỗi Gmail có 1 mật khẩu riêng • Lưu trữ và bảo vệ lịch trình cá nhân
                   </p>
                 </div>
               </div>
-              <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-200">✕</button>
+
+              <button
+                onClick={onClose}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Dynamic Navigation Tabs */}
+            <div className="p-3 bg-slate-100/70 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex p-1 rounded-2xl bg-slate-200/80 dark:bg-slate-950/80 border border-slate-300/40 dark:border-slate-800">
+                {isAccountLoggedIn ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('profile')}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                        activeTab === 'profile'
+                          ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      <span>👤</span>
+                      <span>Hồ Sơ & Đổi MK</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('google_api')}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                        activeTab === 'google_api'
+                          ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      <span>🔑</span>
+                      <span>Google Sync API</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('login')}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                        activeTab === 'login'
+                          ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      <span>✉️</span>
+                      <span>Đăng Nhập Gmail</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('register')}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                        activeTab === 'register'
+                          ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      <span>➕</span>
+                      <span>Đăng Ký Mật Khẩu</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('google_api')}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                        activeTab === 'google_api'
+                          ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      <span>🔑</span>
+                      <span>Google Cloud</span>
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
             {/* Modal Body */}
-            <div className="p-5 space-y-4 text-sm overflow-y-auto">
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-5 text-sm flex-1">
               
-              {/* Account Status Card */}
-              <div className="p-4 rounded-2xl bg-slate-100 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Trạng thái tài khoản
-                  </span>
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${
-                    isGoogleConnected 
-                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' 
-                      : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
-                  }`}>
-                    <span className={`w-2 h-2 rounded-full ${isGoogleConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-                    {isGoogleConnected ? 'Đã đăng nhập Gmail' : 'Chưa đăng nhập'}
-                  </span>
-                </div>
-
-                {isGoogleConnected && googleUser ? (
-                  <div className="mt-3 flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800">
-                    <div className="flex items-center gap-3">
-                      {googleUser.picture ? (
-                        <img src={googleUser.picture} alt={googleUser.name} className="w-10 h-10 rounded-full border border-indigo-500 shadow" />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center font-bold text-sm shadow">
-                          {googleUser.name?.charAt(0) || googleUser.email?.charAt(0) || 'G'}
-                        </div>
-                      )}
-                      <div>
-                        <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                          <span>{googleUser.name}</span>
-                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-500 font-bold">Active</span>
-                        </h4>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">{googleUser.email}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => onSync()}
-                        disabled={isSyncing}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow transition disabled:opacity-50"
-                      >
-                        <span>{isSyncing ? '⏳ Đang đồng bộ...' : '🔄 Đồng bộ lại'}</span>
-                      </button>
-                      <button
-                        onClick={onLogout}
-                        className="px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 text-xs font-bold transition"
-                      >
-                        Đăng xuất
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                    Đăng nhập Gmail để lưu trữ và quản lý lịch trình, đồng bộ công việc và phiên Pomodoro của bạn.
-                  </div>
-                )}
-              </div>
-
-              {/* Mode Switcher Tabs */}
-              <div className="flex p-1 rounded-2xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setActiveMode('direct')}
-                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                    activeMode === 'direct'
-                      ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow'
-                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <span>✉️</span>
-                  <span>Đăng Nhập Trực Tiếp Bằng Gmail (Nhanh)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveMode('oauth_api')}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                    activeMode === 'oauth_api'
-                      ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow'
-                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <span>🔑</span>
-                  <span>Google Cloud API (Tùy chọn)</span>
-                </button>
-              </div>
-
-              {/* Mode 1: Direct Gmail Login (No Google Client ID needed!) */}
-              {activeMode === 'direct' && (
-                <form onSubmit={handleDirectLogin} className="space-y-3.5 bg-slate-50/50 dark:bg-slate-900/30 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800">
-                  <div className="space-y-1">
-                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+              {/* TAB 1: LOGIN FORM */}
+              {activeTab === 'login' && (
+                <form onSubmit={handleLoginSubmit} className="space-y-4">
+                  <div className="p-3.5 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200/60 dark:border-indigo-900/40">
+                    <div className="flex items-center gap-2 text-xs font-bold text-indigo-700 dark:text-indigo-300">
                       <span>✨</span>
-                      <span>Đăng nhập nhanh không cần cài đặt Google Cloud Client ID</span>
-                    </span>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Chỉ cần nhập địa chỉ Gmail của bạn để kích hoạt toàn bộ tính năng lịch trình, Kanban và Pomodoro.
+                      <span>Đăng nhập để tải toàn bộ lịch trình đã lưu của bạn</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                      Mỗi tài khoản Gmail đi kèm 1 mật khẩu riêng để bảo vệ và lưu các chỉnh sửa lịch trình của bạn.
                     </p>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                       Địa chỉ Gmail <span className="text-rose-500">*</span>
                     </label>
-                    <input
-                      type="email"
-                      required
-                      value={gmailInput}
-                      onChange={(e) => setGmailInput(e.target.value)}
-                      placeholder="VD: phong09829@gmail.com"
-                      className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100"
-                    />
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">📧</span>
+                      <input
+                        type="email"
+                        required
+                        value={loginEmail}
+                        onChange={(e) => setLoginEmail(e.target.value)}
+                        placeholder="VD: phong09829@gmail.com"
+                        className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
-                      Tên hiển thị
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Mật khẩu tài khoản <span className="text-rose-500">*</span>
                     </label>
-                    <input
-                      type="text"
-                      value={nameInput}
-                      onChange={(e) => setNameInput(e.target.value)}
-                      placeholder="VD: Phong Phạm"
-                      className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100"
-                    />
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔒</span>
+                      <input
+                        type={showLoginPassword ? 'text' : 'password'}
+                        required
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        placeholder="Nhập mật khẩu của Gmail này"
+                        className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowLoginPassword(!showLoginPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      >
+                        {showLoginPassword ? '🙈' : '👁️'}
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="pt-2">
-                    <button
-                      type="submit"
-                      className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-extrabold text-xs shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition active:scale-98"
-                    >
-                      <span>🚀</span>
-                      <span>Đăng Nhập & Kích Hoạt Gmail Ngay</span>
-                    </button>
-                  </div>
+                  <button
+                    type="submit"
+                    className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-extrabold text-xs shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition active:scale-98"
+                  >
+                    <span>🚀</span>
+                    <span>Đăng Nhập & Mở Lịch Trình</span>
+                  </button>
 
-                  <div className="flex items-center gap-2 pt-1 text-[11px] text-slate-500">
-                    <span>Gợi ý nhanh:</span>
+                  <div className="pt-2 text-center text-xs text-slate-500">
+                    <span>Chưa đặt mật khẩu cho Gmail này? </span>
                     <button
                       type="button"
-                      onClick={() => { setGmailInput('phong09829@gmail.com'); setNameInput('Phong Phạm'); }}
-                      className="px-2 py-0.5 rounded-lg bg-slate-200 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
+                      onClick={() => {
+                        setRegEmail(loginEmail);
+                        setActiveTab('register');
+                      }}
+                      className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
                     >
-                      phong09829@gmail.com
+                      Tạo mật khẩu mới ngay
                     </button>
                   </div>
                 </form>
               )}
 
-              {/* Mode 2: Google Cloud OAuth API (Client ID) */}
-              {activeMode === 'oauth_api' && (
+              {/* TAB 2: REGISTER FORM */}
+              {activeTab === 'register' && (
+                <form onSubmit={handleRegisterSubmit} className="space-y-4">
+                  <div className="p-3.5 rounded-2xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200/60 dark:border-purple-900/40">
+                    <div className="flex items-center gap-2 text-xs font-bold text-purple-700 dark:text-purple-300">
+                      <span>✨</span>
+                      <span>Đăng ký Gmail & Thiết lập mật khẩu riêng</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                      Mỗi tài khoản Gmail chỉ cần 1 mật khẩu. Tất cả sự kiện lịch trình sẽ được lưu vĩnh viễn theo Gmail này.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Tên hiển thị (Tùy chọn)
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">👤</span>
+                      <input
+                        type="text"
+                        value={regName}
+                        onChange={(e) => setRegName(e.target.value)}
+                        placeholder="VD: Phong Phạm"
+                        className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Địa chỉ Gmail <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">📧</span>
+                      <input
+                        type="email"
+                        required
+                        value={regEmail}
+                        onChange={(e) => setRegEmail(e.target.value)}
+                        placeholder="VD: phong09829@gmail.com"
+                        className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Thiết lập Mật khẩu <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔒</span>
+                      <input
+                        type={showRegPassword ? 'text' : 'password'}
+                        required
+                        minLength={4}
+                        value={regPassword}
+                        onChange={(e) => setRegPassword(e.target.value)}
+                        placeholder="Tối thiểu 4 ký tự"
+                        className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowRegPassword(!showRegPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      >
+                        {showRegPassword ? '🙈' : '👁️'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Xác nhận lại Mật khẩu <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔒</span>
+                      <input
+                        type={showRegPassword ? 'text' : 'password'}
+                        required
+                        value={regConfirmPassword}
+                        onChange={(e) => setRegConfirmPassword(e.target.value)}
+                        placeholder="Nhập lại mật khẩu ở trên"
+                        className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs shadow-lg shadow-purple-500/25 flex items-center justify-center gap-2 transition active:scale-98"
+                  >
+                    <span>✅</span>
+                    <span>Tạo Tài Khoản & Bắt Đầu Lưu Lịch Trình</span>
+                  </button>
+
+                  <div className="pt-2 text-center text-xs text-slate-500">
+                    <span>Đã có tài khoản? </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoginEmail(regEmail);
+                        setActiveTab('login');
+                      }}
+                      className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
+                    >
+                      Đăng nhập ngay
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* TAB 3: PROFILE & CHANGE PASSWORD (When Logged in) */}
+              {activeTab === 'profile' && currentUser && (
+                <div className="space-y-5">
+                  <div className="p-4 rounded-2xl border bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Tài khoản đang đăng nhập
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        Đã bảo mật bằng mật khẩu
+                      </span>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center font-extrabold text-base shadow-md">
+                          {currentUser.name?.charAt(0) || currentUser.email?.charAt(0) || 'U'}
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                            <span>{currentUser.name || 'Người dùng'}</span>
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-600 font-bold">Active</span>
+                          </h4>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">{currentUser.email}</p>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={onLogoutAccount}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 text-xs font-bold transition border border-rose-200/60 dark:border-rose-900/40"
+                        title="Đăng xuất tài khoản này"
+                      >
+                        <span>🚪</span>
+                        <span>Đăng xuất</span>
+                      </button>
+                    </div>
+
+                    {/* Storage Metrics for this Account */}
+                    <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-200 dark:border-slate-800 text-center">
+                      <div className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60">
+                        <span className="block text-base font-extrabold text-indigo-600 dark:text-indigo-400">{events.length}</span>
+                        <span className="text-[10px] font-semibold text-slate-500">Lịch trình đã lưu</span>
+                      </div>
+                      <div className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60">
+                        <span className="block text-base font-extrabold text-purple-600 dark:text-purple-400">{tasks.length}</span>
+                        <span className="text-[10px] font-semibold text-slate-500">Công việc</span>
+                      </div>
+                      <div className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60">
+                        <span className="block text-base font-extrabold text-amber-600 dark:text-amber-400">{pomoSessions.length}</span>
+                        <span className="text-[10px] font-semibold text-slate-500">Phiên Pomodoro</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Change Password Sub-form */}
+                  <form onSubmit={handleChangePasswordSubmit} className="space-y-3.5 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                        <span>🔒</span> Đổi mật khẩu tài khoản
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowChangePassword(!showChangePassword)}
+                        className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1"
+                      >
+                        <span>{showChangePassword ? '🙈 Ẩn' : '👁️ Hiện'}</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                          Mật khẩu cũ
+                        </label>
+                        <input
+                          type={showChangePassword ? 'text' : 'password'}
+                          required
+                          value={oldPassword}
+                          onChange={(e) => setOldPassword(e.target.value)}
+                          placeholder="Mật khẩu hiện tại"
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                          Mật khẩu mới
+                        </label>
+                        <input
+                          type={showChangePassword ? 'text' : 'password'}
+                          required
+                          minLength={4}
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="Tối thiểu 4 ký tự"
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                          Xác nhận lại
+                        </label>
+                        <input
+                          type={showChangePassword ? 'text' : 'password'}
+                          required
+                          value={confirmNewPassword}
+                          onChange={(e) => setConfirmNewPassword(e.target.value)}
+                          placeholder="Nhập lại mật khẩu mới"
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="submit"
+                        className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition"
+                      >
+                        Cập Nhật Mật Khẩu
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* TAB 4: GOOGLE CLOUD OAUTH API */}
+              {activeTab === 'google_api' && (
                 <div className="space-y-4">
+                  <div className="p-3.5 rounded-2xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/40">
+                    <div className="flex items-center gap-2 text-xs font-bold text-blue-700 dark:text-blue-300">
+                      <span>🔄</span>
+                      <span>Đồng bộ 2 chiều thời gian thực với Google Calendar API</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                      Tùy chọn kết nối với Google Cloud Console để đồng bộ sự kiện giữa Web và app Google Calendar trên điện thoại của bạn.
+                    </p>
+                  </div>
+
                   <div className="space-y-3">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
@@ -2668,12 +3321,12 @@
                           value={inputVal}
                           onChange={(e) => setInputVal(e.target.value)}
                           placeholder="VD: 123456789-abcdef.apps.googleusercontent.com"
-                          className="flex-1 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-slate-100"
+                          className="flex-1 px-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-slate-100"
                         />
                         <button
                           type="button"
                           onClick={() => { onSaveClientId(inputVal.trim()); showToast('Đã lưu Client ID!', 'success'); }}
-                          className="px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-xs font-bold transition"
+                          className="px-4 py-2.5 rounded-xl bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-xs font-bold transition"
                         >
                           Lưu
                         </button>
@@ -2694,7 +3347,7 @@
 
                   <div className="p-3.5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/40 space-y-1.5 text-xs">
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-indigo-900 dark:text-indigo-300">Origin URL:</span>
+                      <span className="font-bold text-indigo-900 dark:text-indigo-300">Origin URL (Thêm vào Google Console):</span>
                       <button
                         type="button"
                         onClick={handleCopyOrigin}
@@ -2713,10 +3366,13 @@
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200 dark:border-slate-800 flex justify-end">
+            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center text-xs">
+              <span className="text-slate-400 font-medium">
+                {isAccountLoggedIn ? `Đang đăng nhập: ${currentUser.email}` : 'Chế độ lưu trữ cục bộ'}
+              </span>
               <button
                 onClick={onClose}
-                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow transition"
+                className="px-5 py-2 rounded-xl bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900 text-xs font-bold shadow transition"
               >
                 Đóng
               </button>
@@ -2806,7 +3462,7 @@
     }
 
     // --- SETTINGS MODAL STANDALONE ---
-    function SettingsModalStandalone({ isOpen, onClose, settings, onSave, onExport, onImport, onReset }) {
+    function SettingsModalStandalone({ isOpen, onClose, settings, currentUser, isAccountLoggedIn, onLogoutAccount, onSave, onExport, onImport, onReset }) {
       const [formData, setFormData] = useState({ ...settings });
       const fileRef = useRef(null);
 
@@ -2829,8 +3485,46 @@
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in">
           <div className="glass-card w-full max-w-lg rounded-2xl shadow-2xl p-6 border border-slate-200 dark:border-slate-800 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
-              <h2 className="text-lg font-bold">Cài Đặt Hệ Thống</h2>
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <span>⚙️</span> Cài Đặt Hệ Thống
+              </h2>
               <button onClick={onClose} className="text-slate-400">✕</button>
+            </div>
+
+            {/* Account Status Card */}
+            <div className="p-3.5 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <span>🛡️</span> Tài Khoản & Bảo Mật
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  isAccountLoggedIn ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
+                }`}>
+                  {isAccountLoggedIn ? 'Đã đăng nhập' : 'Chưa đăng nhập'}
+                </span>
+              </div>
+              {isAccountLoggedIn ? (
+                <div className="flex items-center justify-between pt-1">
+                  <div>
+                    <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{currentUser?.name || 'Người dùng'}</p>
+                    <p className="text-[11px] text-slate-500 font-mono">{currentUser?.email}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onLogoutAccount) onLogoutAccount();
+                      onClose();
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-500 text-xs font-bold hover:bg-rose-500/20 transition"
+                  >
+                    Đăng xuất
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">
+                  Đăng nhập Gmail có mật khẩu riêng để bảo vệ và lưu các chỉnh sửa lịch trình của bạn.
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3 text-xs">
@@ -2840,7 +3534,7 @@
                   type="number"
                   value={formData.focusDuration}
                   onChange={e => setFormData({ ...formData, focusDuration: Number(e.target.value) })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border text-xs font-semibold"
                 />
               </div>
               <div>
@@ -2849,7 +3543,7 @@
                   type="number"
                   value={formData.dailyGoalPomos}
                   onChange={e => setFormData({ ...formData, dailyGoalPomos: Number(e.target.value) })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border text-xs font-semibold"
                 />
               </div>
             </div>

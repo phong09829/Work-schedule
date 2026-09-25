@@ -23,7 +23,7 @@ export const EventModal = ({
   initialDate = null,
   initialHour = 9,
 }) => {
-  const { addEvent, updateEvent, deleteEvent, linkEventToPomodoro, isGoogleConnected } = useApp();
+  const { addEvent, updateEvent, deleteEvent, linkEventToPomodoro, isGoogleConnected, currentUser } = useApp();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -131,12 +131,16 @@ export const EventModal = ({
                 {eventToEdit ? 'Chỉnh Sửa Sự Kiện' : 'Thêm Sự Kiện Lịch Trình Mới'}
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-0.5">
-                {isGoogleConnected ? (
+                {currentUser?.email ? (
+                  <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold font-mono">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Lưu vào tài khoản: {currentUser.email}
+                  </span>
+                ) : isGoogleConnected ? (
                   <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
                     <RefreshCw className="w-3 h-3 animate-spin-slow" /> Tự động đồng bộ 2 chiều với Google Calendar
                   </span>
                 ) : (
-                  <span>Lưu trữ nội bộ • Kết nối Google để đồng bộ 2 chiều</span>
+                  <span>Lưu trữ nội bộ • Đăng nhập để lưu theo tài khoản Gmail</span>
                 )}
               </p>
             </div>

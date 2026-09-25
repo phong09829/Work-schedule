@@ -6,7 +6,16 @@ import {
   DEFAULT_SETTINGS, 
   generateInitialPomoSessions, 
   getStoredData, 
-  setStoredData 
+  setStoredData,
+  getUserData,
+  setUserData,
+  getCurrentUser,
+  setCurrentUser,
+  getRegisteredUsers,
+  registerUserAccount,
+  loginUserAccount,
+  changeUserPassword,
+  normalizeEmail
 } from '../utils/storage';
 import { soundManager } from '../utils/audio';
 import {
@@ -26,23 +35,44 @@ export const AppProvider = ({ children }) => {
   // Navigation State: 'dashboard' | 'tasks' | 'calendar' | 'pomodoro'
   const [activeTab, setActiveTab] = useState('dashboard');
 
-  // Tasks State
-  const [tasks, setTasks] = useState(() => {
-    return getStoredData(STORAGE_KEYS.TASKS, DEFAULT_TASKS);
+  // Active Logged-in User Account
+  const [currentUser, setCurrentUserState] = useState(() => {
+    return getCurrentUser();
   });
 
-  // Calendar Events State
+  // Calendar Events State (loaded for active user or legacy/fallback)
   const [events, setEvents] = useState(() => {
+    const user = getCurrentUser();
+    if (user && user.email) {
+      return getUserData(user.email, 'events', DEFAULT_CALENDAR_EVENTS);
+    }
     return getStoredData(GOOGLE_STORAGE_KEYS.CALENDAR_EVENTS, DEFAULT_CALENDAR_EVENTS);
+  });
+
+  // Tasks State (loaded for active user or legacy/fallback)
+  const [tasks, setTasks] = useState(() => {
+    const user = getCurrentUser();
+    if (user && user.email) {
+      return getUserData(user.email, 'tasks', DEFAULT_TASKS);
+    }
+    return getStoredData(STORAGE_KEYS.TASKS, DEFAULT_TASKS);
   });
 
   // Pomodoro Sessions History
   const [pomoSessions, setPomoSessions] = useState(() => {
+    const user = getCurrentUser();
+    if (user && user.email) {
+      return getUserData(user.email, 'pomo_sessions', generateInitialPomoSessions());
+    }
     return getStoredData(STORAGE_KEYS.POMO_SESSIONS, generateInitialPomoSessions());
   });
 
   // Settings State
   const [settings, setSettings] = useState(() => {
+    const user = getCurrentUser();
+    if (user && user.email) {
+      return getUserData(user.email, 'settings', DEFAULT_SETTINGS);
+    }
     return getStoredData(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS);
   });
 
@@ -65,7 +95,7 @@ export const AppProvider = ({ children }) => {
 
   const [isGoogleSyncing, setIsGoogleSyncing] = useState(false);
 
-  // Active Task / Event currently linked to Pomodoro
+  // Active Task currently linked to Pomodoro
   const [activeTaskId, setActiveTaskId] = useState(() => {
     return tasks.find(t => t.status === 'in_progress')?.id || tasks[0]?.id || null;
   });
@@ -80,25 +110,199 @@ export const AppProvider = ({ children }) => {
     }, duration);
   }, []);
 
-  // Persist Tasks
-  useEffect(() => {
-    setStoredData(STORAGE_KEYS.TASKS, tasks);
-  }, [tasks]);
+  // --- Multi-Account Authentication Handlers ---
 
-  // Persist Events
+  // Register with Gmail + 1 unique Password
+  const registerAccount = useCallback(({ email, password, name }) => {
+    const res = registerUserAccount({ email, password, name });
+    if (!res.ok) {
+      showToast(res.message, 'error');
+      return res;
+    }
+
+    const newUser = res.user;
+    setCurrentUserState(newUser);
+
+    // If this account doesn't have events saved yet, preserve current events/tasks for them
+    const existingEvents = getUserData(newUser.email, 'events', null);
+    if (!existingEvents) {
+      setUserData(newUser.email, 'events', events);
+      setUserData(newUser.email, 'tasks', tasks);
+      setUserData(newUser.email, 'pomo_sessions', pomoSessions);
+      setUserData(newUser.email, 'settings', settings);
+    } else {
+      setEvents(existingEvents);
+      setTasks(getUserData(newUser.email, 'tasks', DEFAULT_TASKS));
+      setPomoSessions(getUserData(newUser.email, 'pomo_sessions', generateInitialPomoSessions()));
+      setSettings(getUserData(newUser.email, 'settings', DEFAULT_SETTINGS));
+    }
+
+    showToast(`Đăng ký thành công! Đã bảo vệ và lưu lịch trình cho ${newUser.email}`, 'success');
+    return res;
+  }, [events, tasks, pomoSessions, settings, showToast]);
+
+  // Login with Gmail + Password
+  const loginAccount = useCallback(({ email, password }) => {
+    const res = loginUserAccount({ email, password });
+    if (!res.ok) {
+      showToast(res.message, 'error');
+      return res;
+    }
+
+    const user = res.user;
+    setCurrentUserState(user);
+
+    // Load all data specific to this account
+    const userEvents = getUserData(user.email, 'events', DEFAULT_CALENDAR_EVENTS);
+    const userTasks = getUserData(user.email, 'tasks', DEFAULT_TASKS);
+    const userPomo = getUserData(user.email, 'pomo_sessions', generateInitialPomoSessions());
+    const userSettings = getUserData(user.email, 'settings', DEFAULT_SETTINGS);
+
+    setEvents(userEvents);
+    setTasks(userTasks);
+    setPomoSessions(userPomo);
+    setSettings(userSettings);
+
+    showToast(`Đăng nhập thành công! Đã tải ${userEvents.length} lịch trình của ${user.name || user.email}`, 'success');
+    return res;
+  }, [showToast]);
+
+  // Change Password for current Gmail
+  const changeAccountPassword = useCallback(({ oldPassword, newPassword }) => {
+    if (!currentUser || !currentUser.email) {
+      showToast('Vui lòng đăng nhập tài khoản trước khi đổi mật khẩu!', 'warning');
+      return { ok: false, message: 'Chưa đăng nhập' };
+    }
+
+    const res = changeUserPassword({
+      email: currentUser.email,
+      oldPassword,
+      newPassword,
+    });
+
+    if (res.ok) {
+      showToast('Đổi mật khẩu thành công! Hãy ghi nhớ mật khẩu mới nhé.', 'success');
+    } else {
+      showToast(res.message, 'error');
+    }
+    return res;
+  }, [currentUser, showToast]);
+
+  // Logout current user
+  const logoutAccount = useCallback(() => {
+    setCurrentUser(null);
+    setCurrentUserState(null);
+    setGoogleUser(null);
+    setGoogleToken(null);
+    setLastSyncTime(null);
+    showToast('Đã đăng xuất tài khoản.', 'info');
+  }, [showToast]);
+
+  // Direct Gmail Login legacy fallback (creates account with password or logs in)
+  const loginWithDirectGmail = useCallback((email, customName = null) => {
+    if (!email || !email.includes('@')) {
+      showToast('Vui lòng nhập địa chỉ email hợp lệ!', 'warning');
+      return false;
+    }
+    const cleanEmail = normalizeEmail(email);
+    // Check if user exists
+    const users = getRegisteredUsers();
+    const existing = users.find(u => normalizeEmail(u.email) === cleanEmail);
+
+    if (existing) {
+      showToast(`Tài khoản "${cleanEmail}" đã có mật khẩu. Vui lòng nhập mật khẩu để đăng nhập!`, 'warning');
+      return false;
+    }
+
+    // If new user, register with a default password or invite them
+    const res = registerAccount({
+      email: cleanEmail,
+      password: 'password123',
+      name: customName,
+    });
+    return res.ok;
+  }, [registerAccount, showToast]);
+
+  // Google OAuth GIS Login Handler
+  const handleGoogleLoginSuccess = useCallback(async (tokenResponse) => {
+    try {
+      const accessToken = tokenResponse.access_token;
+      const expiresIn = tokenResponse.expires_in || 3599;
+      const tokenObj = {
+        access_token: accessToken,
+        expires_at: Date.now() + expiresIn * 1000,
+        token_type: tokenResponse.token_type || 'Bearer',
+        scope: tokenResponse.scope,
+      };
+
+      setGoogleToken(tokenObj);
+
+      // Fetch Profile
+      const profile = await fetchGoogleUserProfile(accessToken);
+      setGoogleUser(profile);
+
+      // Also ensure this Google account is recognized as currentUser
+      const cleanEmail = normalizeEmail(profile.email);
+      let existingUser = getRegisteredUsers().find(u => normalizeEmail(u.email) === cleanEmail);
+      if (!existingUser) {
+        registerUserAccount({
+          email: cleanEmail,
+          password: 'google_oauth_login',
+          name: profile.name,
+        });
+      }
+
+      const activeSession = {
+        id: profile.id,
+        name: profile.name,
+        email: cleanEmail,
+        avatar: profile.picture,
+        provider: 'google',
+      };
+      setCurrentUser(activeSession);
+      setCurrentUserState(activeSession);
+
+      showToast(`Chào mừng ${profile.name}! Đã kết nối Google thành công.`, 'success');
+
+      // Immediate 2-way sync
+      syncWithGoogleCalendar(accessToken);
+    } catch (err) {
+      console.error('Google login error:', err);
+      showToast('Đăng nhập Google thất bại hoặc không thể lấy hồ sơ người dùng.', 'error');
+    }
+  }, [showToast]);
+
+  // Persist Events to Active User Storage and Fallback
   useEffect(() => {
+    if (currentUser && currentUser.email) {
+      setUserData(currentUser.email, 'events', events);
+    }
     setStoredData(GOOGLE_STORAGE_KEYS.CALENDAR_EVENTS, events);
-  }, [events]);
+  }, [events, currentUser]);
 
-  // Persist Pomodoro Sessions
+  // Persist Tasks to Active User Storage and Fallback
   useEffect(() => {
+    if (currentUser && currentUser.email) {
+      setUserData(currentUser.email, 'tasks', tasks);
+    }
+    setStoredData(STORAGE_KEYS.TASKS, tasks);
+  }, [tasks, currentUser]);
+
+  // Persist Pomodoro Sessions to Active User Storage and Fallback
+  useEffect(() => {
+    if (currentUser && currentUser.email) {
+      setUserData(currentUser.email, 'pomo_sessions', pomoSessions);
+    }
     setStoredData(STORAGE_KEYS.POMO_SESSIONS, pomoSessions);
-  }, [pomoSessions]);
+  }, [pomoSessions, currentUser]);
 
   // Persist Settings
   useEffect(() => {
+    if (currentUser && currentUser.email) {
+      setUserData(currentUser.email, 'settings', settings);
+    }
     setStoredData(STORAGE_KEYS.SETTINGS, settings);
-  }, [settings]);
+  }, [settings, currentUser]);
 
   // Persist Google Auth Info
   useEffect(() => {
@@ -117,80 +321,13 @@ export const AppProvider = ({ children }) => {
     setStoredData(GOOGLE_STORAGE_KEYS.LAST_SYNC_TIME, lastSyncTime);
   }, [lastSyncTime]);
 
-  // Check if Google user is logged in
   const isGoogleConnected = useMemo(() => {
     return Boolean(googleUser);
   }, [googleUser]);
 
-  // Direct Gmail Login (No Google Client ID required)
-  const loginWithDirectGmail = useCallback((email, customName = null) => {
-    if (!email || !email.includes('@')) {
-      showToast('Vui lòng nhập địa chỉ email hợp lệ!', 'warning');
-      return false;
-    }
-    const cleanEmail = email.trim().toLowerCase();
-    const userName = customName && customName.trim() 
-      ? customName.trim() 
-      : cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-
-    const profile = {
-      id: `gmail-${Date.now()}`,
-      name: userName,
-      email: cleanEmail,
-      picture: null,
-      provider: 'direct_gmail',
-      connectedAt: new Date().toISOString(),
-    };
-
-    const tokenObj = {
-      access_token: `direct_token_${Date.now()}`,
-      expires_at: Date.now() + 365 * 24 * 3600 * 1000,
-      token_type: 'DirectGmail',
-      provider: 'direct_gmail',
-    };
-
-    setGoogleUser(profile);
-    setGoogleToken(tokenObj);
-    setLastSyncTime(new Date().toISOString());
-
-    showToast(`Đăng nhập thành công với Gmail: ${cleanEmail}!`, 'success');
-    return true;
-  }, [showToast]);
-
-  // Google Login Handler (supports Google Token Client)
-  const handleGoogleLoginSuccess = useCallback(async (tokenResponse) => {
-    try {
-      const accessToken = tokenResponse.access_token;
-      const expiresIn = tokenResponse.expires_in || 3599;
-      const tokenObj = {
-        access_token: accessToken,
-        expires_at: Date.now() + expiresIn * 1000,
-        token_type: tokenResponse.token_type || 'Bearer',
-        scope: tokenResponse.scope,
-      };
-
-      setGoogleToken(tokenObj);
-
-      // Fetch Profile
-      const profile = await fetchGoogleUserProfile(accessToken);
-      setGoogleUser(profile);
-      showToast(`Chào mừng ${profile.name}! Đã kết nối Google thành công.`, 'success');
-
-      // Immediate 2-way sync
-      syncWithGoogleCalendar(accessToken);
-    } catch (err) {
-      console.error('Google login error:', err);
-      showToast('Đăng nhập Google thất bại hoặc không thể lấy hồ sơ người dùng.', 'error');
-    }
-  }, [showToast]);
-
-  // Google Logout Handler
-  const handleGoogleLogout = useCallback(() => {
-    setGoogleUser(null);
-    setGoogleToken(null);
-    setLastSyncTime(null);
-    showToast('Đã đăng xuất tài khoản.', 'info');
-  }, [showToast]);
+  const isAccountLoggedIn = useMemo(() => {
+    return Boolean(currentUser && currentUser.email);
+  }, [currentUser]);
 
   // Sync with Google Calendar (2-way sync)
   const syncWithGoogleCalendar = useCallback(async (customToken = null) => {
@@ -202,25 +339,20 @@ export const AppProvider = ({ children }) => {
 
     setIsGoogleSyncing(true);
     try {
-      // 1. Fetch Google Calendar events (range -30 days to +90 days)
       const now = new Date();
       const minDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const maxDate = new Date(now.getFullYear(), now.getMonth() + 3, 1);
       
       const gcalEvents = await fetchGoogleCalendarEvents(token, minDate, maxDate);
 
-      // 2. Merge with local events
       setEvents(prevEvents => {
         const localNonGoogle = prevEvents.filter(e => !e.googleEventId);
+        const merged = [...gcalEvents, ...localNonGoogle];
         
-        // Match existing local events by googleEventId
-        const merged = [...gcalEvents];
-
-        localNonGoogle.forEach(localEvt => {
-          // If local event not on google yet, keep it
-          merged.push(localEvt);
-        });
-
+        // Save immediately to account storage
+        if (currentUser && currentUser.email) {
+          setUserData(currentUser.email, 'events', merged);
+        }
         return merged;
       });
 
@@ -231,16 +363,17 @@ export const AppProvider = ({ children }) => {
       console.error('Google sync error:', err);
       if (err.message === 'TOKEN_EXPIRED') {
         showToast('Phiên đăng nhập Google đã hết hạn. Vui lòng đăng nhập lại.', 'error');
-        handleGoogleLogout();
+        setGoogleUser(null);
+        setGoogleToken(null);
       } else {
         showToast(`Lỗi đồng bộ Google Calendar: ${err.message || 'Không thể kết nối API'}`, 'error');
       }
     } finally {
       setIsGoogleSyncing(false);
     }
-  }, [googleToken, showToast, handleGoogleLogout]);
+  }, [googleToken, currentUser, showToast]);
 
-  // Calendar Event Actions (with Instant 2-way Google Sync)
+  // Calendar Event Actions (with Guaranteed Instant Persistence & Google Sync)
   const addEvent = useCallback(async (eventData) => {
     const newEvent = {
       id: `evt-${Date.now()}`,
@@ -257,10 +390,18 @@ export const AppProvider = ({ children }) => {
       googleEventId: null,
       synced: !isGoogleConnected,
       createdAt: new Date().toISOString(),
+      userEmail: currentUser?.email || 'guest',
     };
 
-    // Update locally first for instant UI response
-    setEvents(prev => [newEvent, ...prev]);
+    // Update state and write to storage immediately
+    setEvents(prev => {
+      const updated = [newEvent, ...prev];
+      if (currentUser && currentUser.email) {
+        setUserData(currentUser.email, 'events', updated);
+      }
+      return updated;
+    });
+
     showToast(`Đã thêm lịch trình: "${newEvent.title}"`, 'success');
 
     // Sync to Google Calendar if connected
@@ -269,14 +410,20 @@ export const AppProvider = ({ children }) => {
         setIsGoogleSyncing(true);
         const createdGCal = await createGoogleCalendarEvent(googleToken.access_token, newEvent);
         if (createdGCal && createdGCal.id) {
-          setEvents(prev => prev.map(e => e.id === newEvent.id ? {
-            ...e,
-            googleEventId: createdGCal.id,
-            isGoogleEvent: true,
-            synced: true,
-            htmlLink: createdGCal.htmlLink,
-            meetUrl: createdGCal.hangoutLink || newEvent.meetUrl,
-          } : e));
+          setEvents(prev => {
+            const updated = prev.map(e => e.id === newEvent.id ? {
+              ...e,
+              googleEventId: createdGCal.id,
+              isGoogleEvent: true,
+              synced: true,
+              htmlLink: createdGCal.htmlLink,
+              meetUrl: createdGCal.hangoutLink || newEvent.meetUrl,
+            } : e);
+            if (currentUser && currentUser.email) {
+              setUserData(currentUser.email, 'events', updated);
+            }
+            return updated;
+          });
           showToast(`Đã đồng bộ ngay lên Google Calendar!`, 'success');
         }
       } catch (err) {
@@ -288,20 +435,26 @@ export const AppProvider = ({ children }) => {
     }
 
     return newEvent;
-  }, [isGoogleConnected, googleToken, showToast]);
+  }, [isGoogleConnected, googleToken, currentUser, showToast]);
 
   const updateEvent = useCallback(async (id, updatedFields) => {
     let targetEvent = null;
 
-    setEvents(prev => prev.map(evt => {
-      if (evt.id === id) {
-        targetEvent = { ...evt, ...updatedFields };
-        return targetEvent;
+    setEvents(prev => {
+      const updated = prev.map(evt => {
+        if (evt.id === id) {
+          targetEvent = { ...evt, ...updatedFields };
+          return targetEvent;
+        }
+        return evt;
+      });
+      if (currentUser && currentUser.email) {
+        setUserData(currentUser.email, 'events', updated);
       }
-      return evt;
-    }));
+      return updated;
+    });
 
-    showToast('Đã cập nhật sự kiện lịch trình thành công!', 'info');
+    showToast('Đã lưu chỉnh sửa lịch trình thành công!', 'info');
 
     // Sync update to Google Calendar if linked
     if (targetEvent && targetEvent.googleEventId && isGoogleConnected && googleToken?.access_token) {
@@ -311,16 +464,22 @@ export const AppProvider = ({ children }) => {
         showToast('Đã đồng bộ cập nhật với Google Calendar!', 'success');
       } catch (err) {
         console.error('Sync update event error:', err);
-        showToast('Cập nhật nội bộ xong. Lỗi khi đồng bộ Google Calendar.', 'warning');
       } finally {
         setIsGoogleSyncing(false);
       }
     }
-  }, [isGoogleConnected, googleToken, showToast]);
+  }, [isGoogleConnected, googleToken, currentUser, showToast]);
 
   const deleteEvent = useCallback(async (id) => {
     const eventToDelete = events.find(e => e.id === id);
-    setEvents(prev => prev.filter(e => e.id !== id));
+    setEvents(prev => {
+      const updated = prev.filter(e => e.id !== id);
+      if (currentUser && currentUser.email) {
+        setUserData(currentUser.email, 'events', updated);
+      }
+      return updated;
+    });
+
     showToast(`Đã xóa sự kiện "${eventToDelete?.title || ''}"`, 'warning');
 
     // Delete on Google Calendar if linked
@@ -335,7 +494,7 @@ export const AppProvider = ({ children }) => {
         setIsGoogleSyncing(false);
       }
     }
-  }, [events, isGoogleConnected, googleToken, showToast]);
+  }, [events, isGoogleConnected, googleToken, currentUser, showToast]);
 
   // Active Task Object
   const activeTask = useMemo(() => {
@@ -356,12 +515,19 @@ export const AppProvider = ({ children }) => {
       completedPomos: 0,
       createdAt: new Date().toISOString(),
       completedAt: null,
+      userEmail: currentUser?.email || 'guest',
     };
 
-    setTasks(prev => [newTask, ...prev]);
+    setTasks(prev => {
+      const updated = [newTask, ...prev];
+      if (currentUser && currentUser.email) {
+        setUserData(currentUser.email, 'tasks', updated);
+      }
+      return updated;
+    });
+
     showToast(`Đã thêm công việc: "${newTask.title}"`, 'success');
 
-    // If deadline is present and user wants auto-calendar-sync
     if (taskData.syncToCalendar && taskData.deadline) {
       const deadlineDate = new Date(taskData.deadline);
       const endDate = new Date(deadlineDate.getTime() + 60 * 60 * 1000);
@@ -380,24 +546,35 @@ export const AppProvider = ({ children }) => {
   };
 
   const updateTask = (id, updatedFields) => {
-    setTasks(prev => prev.map(task => {
-      if (task.id === id) {
-        const isNowDone = updatedFields.status === 'done' && task.status !== 'done';
-        const updated = {
-          ...task,
-          ...updatedFields,
-          completedAt: isNowDone ? new Date().toISOString() : (updatedFields.status && updatedFields.status !== 'done' ? null : task.completedAt),
-        };
-        return updated;
+    setTasks(prev => {
+      const updated = prev.map(task => {
+        if (task.id === id) {
+          const isNowDone = updatedFields.status === 'done' && task.status !== 'done';
+          return {
+            ...task,
+            ...updatedFields,
+            completedAt: isNowDone ? new Date().toISOString() : (updatedFields.status && updatedFields.status !== 'done' ? null : task.completedAt),
+          };
+        }
+        return task;
+      });
+      if (currentUser && currentUser.email) {
+        setUserData(currentUser.email, 'tasks', updated);
       }
-      return task;
-    }));
+      return updated;
+    });
     showToast('Đã cập nhật công việc thành công!', 'info');
   };
 
   const deleteTask = (id) => {
     const taskToDelete = tasks.find(t => t.id === id);
-    setTasks(prev => prev.filter(t => t.id !== id));
+    setTasks(prev => {
+      const updated = prev.filter(t => t.id !== id);
+      if (currentUser && currentUser.email) {
+        setUserData(currentUser.email, 'tasks', updated);
+      }
+      return updated;
+    });
     if (activeTaskId === id) {
       setActiveTaskId(null);
     }
@@ -405,31 +582,35 @@ export const AppProvider = ({ children }) => {
   };
 
   const moveTaskStatus = (id, newStatus) => {
-    setTasks(prev => prev.map(task => {
-      if (task.id === id) {
-        const isBecomingDone = newStatus === 'done' && task.status !== 'done';
-        if (isBecomingDone) {
-          try {
-            confetti({
-              particleCount: 80,
-              spread: 60,
-              origin: { y: 0.7 }
-            });
-            if (settings.soundEnabled) {
-              soundManager.playTaskSuccessSound(settings.soundVolume);
-            }
-          } catch (e) {
-            console.log(e);
+    setTasks(prev => {
+      const updated = prev.map(task => {
+        if (task.id === id) {
+          const isBecomingDone = newStatus === 'done' && task.status !== 'done';
+          if (isBecomingDone) {
+            try {
+              confetti({
+                particleCount: 80,
+                spread: 60,
+                origin: { y: 0.7 }
+              });
+              if (settings.soundEnabled) {
+                soundManager.playTaskSuccessSound(settings.soundVolume);
+              }
+            } catch (e) {}
           }
+          return {
+            ...task,
+            status: newStatus,
+            completedAt: newStatus === 'done' ? new Date().toISOString() : null,
+          };
         }
-        return {
-          ...task,
-          status: newStatus,
-          completedAt: newStatus === 'done' ? new Date().toISOString() : null,
-        };
+        return task;
+      });
+      if (currentUser && currentUser.email) {
+        setUserData(currentUser.email, 'tasks', updated);
       }
-      return task;
-    }));
+      return updated;
+    });
   };
 
   const linkTaskToPomodoro = (task) => {
@@ -439,7 +620,6 @@ export const AppProvider = ({ children }) => {
   };
 
   const linkEventToPomodoro = (event) => {
-    // Check if task exists for this event or create temporary link
     let existingTask = tasks.find(t => t.title === event.title);
     if (!existingTask) {
       const created = addTask({
@@ -466,17 +646,23 @@ export const AppProvider = ({ children }) => {
 
     if (pomoType === 'focus') {
       if (activeTaskId) {
-        setTasks(prev => prev.map(t => {
-          if (t.id === activeTaskId) {
-            const newCount = (t.completedPomos || 0) + 1;
-            return {
-              ...t,
-              completedPomos: newCount,
-              status: t.status === 'todo' ? 'in_progress' : t.status
-            };
+        setTasks(prev => {
+          const updated = prev.map(t => {
+            if (t.id === activeTaskId) {
+              const newCount = (t.completedPomos || 0) + 1;
+              return {
+                ...t,
+                completedPomos: newCount,
+                status: t.status === 'todo' ? 'in_progress' : t.status
+              };
+            }
+            return t;
+          });
+          if (currentUser && currentUser.email) {
+            setUserData(currentUser.email, 'tasks', updated);
           }
-          return t;
-        }));
+          return updated;
+        });
       }
 
       const newSession = {
@@ -488,9 +674,17 @@ export const AppProvider = ({ children }) => {
         taskTitle: activeTask?.title || 'Tập trung tự do',
         category: activeTask?.category || 'Chung',
         completedAt: new Date().toISOString(),
+        userEmail: currentUser?.email || 'guest',
       };
 
-      setPomoSessions(prev => [newSession, ...prev]);
+      setPomoSessions(prev => {
+        const updated = [newSession, ...prev];
+        if (currentUser && currentUser.email) {
+          setUserData(currentUser.email, 'pomo_sessions', updated);
+        }
+        return updated;
+      });
+
       showToast(`Tuyệt vời! Bạn vừa hoàn thành 1 phiên Focus (${durationMins}p)`, 'success');
       
       try {
@@ -504,7 +698,13 @@ export const AppProvider = ({ children }) => {
   };
 
   const updateSettings = (newSettings) => {
-    setSettings(prev => ({ ...prev, ...newSettings }));
+    setSettings(prev => {
+      const updated = { ...prev, ...newSettings };
+      if (currentUser && currentUser.email) {
+        setUserData(currentUser.email, 'settings', updated);
+      }
+      return updated;
+    });
     showToast('Đã lưu cấu hình cài đặt!', 'success');
   };
 
@@ -512,6 +712,7 @@ export const AppProvider = ({ children }) => {
   const exportData = () => {
     const backup = {
       version: '2.0',
+      user: currentUser ? { email: currentUser.email, name: currentUser.name } : null,
       exportDate: new Date().toISOString(),
       tasks,
       events,
@@ -523,7 +724,8 @@ export const AppProvider = ({ children }) => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `focusflow-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    const accountTag = currentUser ? `-${currentUser.email.split('@')[0]}` : '';
+    link.download = `focusflow-backup${accountTag}-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     URL.revokeObjectURL(url);
     showToast('Đã xuất dữ liệu sao lưu thành công!', 'success');
@@ -534,15 +736,27 @@ export const AppProvider = ({ children }) => {
     try {
       if (jsonData.tasks && Array.isArray(jsonData.tasks)) {
         setTasks(jsonData.tasks);
+        if (currentUser && currentUser.email) {
+          setUserData(currentUser.email, 'tasks', jsonData.tasks);
+        }
       }
       if (jsonData.events && Array.isArray(jsonData.events)) {
         setEvents(jsonData.events);
+        if (currentUser && currentUser.email) {
+          setUserData(currentUser.email, 'events', jsonData.events);
+        }
       }
       if (jsonData.pomoSessions && Array.isArray(jsonData.pomoSessions)) {
         setPomoSessions(jsonData.pomoSessions);
+        if (currentUser && currentUser.email) {
+          setUserData(currentUser.email, 'pomo_sessions', jsonData.pomoSessions);
+        }
       }
       if (jsonData.settings) {
         setSettings(jsonData.settings);
+        if (currentUser && currentUser.email) {
+          setUserData(currentUser.email, 'settings', jsonData.settings);
+        }
       }
       if (jsonData.googleClientId) {
         setGoogleClientId(jsonData.googleClientId);
@@ -562,10 +776,17 @@ export const AppProvider = ({ children }) => {
     setPomoSessions(generateInitialPomoSessions());
     setSettings(DEFAULT_SETTINGS);
     setActiveTaskId(DEFAULT_TASKS[0]?.id || null);
+
+    if (currentUser && currentUser.email) {
+      setUserData(currentUser.email, 'events', DEFAULT_CALENDAR_EVENTS);
+      setUserData(currentUser.email, 'tasks', DEFAULT_TASKS);
+      setUserData(currentUser.email, 'pomo_sessions', generateInitialPomoSessions());
+      setUserData(currentUser.email, 'settings', DEFAULT_SETTINGS);
+    }
     showToast('Đã đặt lại dữ liệu mặc định ban đầu!', 'info');
   };
 
-  // Compute Daily & Weekly Analytics
+  // Analytics
   const todayStr = new Date().toISOString().split('T')[0];
 
   const todaySessions = useMemo(() => {
@@ -584,7 +805,6 @@ export const AppProvider = ({ children }) => {
     return tasks.filter(t => t.status === 'done').length;
   }, [tasks]);
 
-  // Streak Calculation
   const streakDays = useMemo(() => {
     let streak = 0;
     const now = new Date();
@@ -607,6 +827,13 @@ export const AppProvider = ({ children }) => {
       value={{
         activeTab,
         setActiveTab,
+        // Current User Account & Auth
+        currentUser,
+        isAccountLoggedIn,
+        registerAccount,
+        loginAccount,
+        changeAccountPassword,
+        logoutAccount,
         // Tasks
         tasks,
         addTask,
@@ -627,7 +854,7 @@ export const AppProvider = ({ children }) => {
         syncWithGoogleCalendar,
         isGoogleSyncing,
         lastSyncTime,
-        // Google / Gmail Auth
+        // Google OAuth & GIS
         googleUser,
         googleToken,
         googleClientId,
@@ -635,7 +862,6 @@ export const AppProvider = ({ children }) => {
         isGoogleConnected,
         loginWithDirectGmail,
         handleGoogleLoginSuccess,
-        handleGoogleLogout,
         // Pomodoro & Settings
         pomoSessions,
         recordCompletedPomodoro,

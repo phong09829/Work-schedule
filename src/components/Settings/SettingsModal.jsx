@@ -11,7 +11,13 @@ import {
   VolumeX, 
   Play,
   Save,
-  Check
+  Check,
+  Shield,
+  Lock,
+  Mail,
+  User,
+  LogIn,
+  LogOut
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { soundManager } from '../../utils/audio';
@@ -23,6 +29,9 @@ export const SettingsModal = ({ isOpen, onClose }) => {
     exportData, 
     importData, 
     resetToDefaults, 
+    currentUser,
+    isAccountLoggedIn,
+    logoutAccount,
     showToast 
   } = useApp();
 
@@ -107,6 +116,46 @@ export const SettingsModal = ({ isOpen, onClose }) => {
         </div>
 
         <form onSubmit={handleSave} className="space-y-6">
+          {/* Section: Account & Password */}
+          <div className="p-4 rounded-2xl bg-slate-100/70 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
+                <Shield className="w-4 h-4 text-brand-500" />
+                <span>Tài Khoản & Mật Khẩu</span>
+              </div>
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                isAccountLoggedIn
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+              }`}>
+                {isAccountLoggedIn ? 'Đã đăng nhập' : 'Chưa đăng nhập'}
+              </span>
+            </div>
+
+            {isAccountLoggedIn ? (
+              <div className="flex items-center justify-between pt-2">
+                <div>
+                  <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{currentUser?.name || 'Người dùng'}</p>
+                  <p className="text-[11px] text-slate-500 font-mono">{currentUser?.email}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    logoutAccount();
+                    onClose();
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold transition flex items-center gap-1"
+                >
+                  <LogOut className="w-3.5 h-3.5" /> Đăng xuất
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500 dark:text-slate-400 pt-1">
+                Đăng nhập Gmail có mật khẩu riêng để bảo vệ và lưu các chỉnh sửa lịch trình của bạn.
+              </p>
+            )}
+          </div>
+
           {/* Section: Pomodoro Timer Settings */}
           <div>
             <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-brand-600 dark:text-brand-400">
