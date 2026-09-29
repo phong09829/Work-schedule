@@ -903,14 +903,20 @@
       };
     };
 
-    const generateQuickSyncToken = (user) => {
+    const generateQuickSyncToken = (user, data = null) => {
       if (!user || !user.email) return '';
       const tokenData = {
         u: normalizeEmail(user.email),
         n: user.name || '',
         h: user.passwordHash || '',
         p: user.password || '',
-        t: Date.now()
+        t: Date.now(),
+        d: data ? {
+          tasks: data.tasks || [],
+          events: data.events || [],
+          pomoSessions: data.pomoSessions || [],
+          settings: data.settings || null,
+        } : null,
       };
       try {
         return btoa(unescape(encodeURIComponent(JSON.stringify(tokenData))));
@@ -919,17 +925,17 @@
       }
     };
 
-    const generatePhoneLoginLink = (user) => {
-      const token = generateQuickSyncToken(user);
+    const generatePhoneLoginLink = (user, data = null) => {
+      const token = generateQuickSyncToken(user, data);
       if (!token) return '';
-      const baseUrl = window.location.href.split('#')[0];
-      return `${baseUrl}#auth=${token}`;
+      const baseUrl = typeof window !== 'undefined' ? window.location.href.split('#')[0] : '';
+      return `${baseUrl}#sync=${token}`;
     };
 
     const parseQuickSyncToken = (tokenStr) => {
       try {
         if (!tokenStr) return null;
-        const cleanToken = tokenStr.trim().replace(/^#(auth|login|sync)=/, '');
+        const cleanToken = tokenStr.trim().replace(/^#(auth|login|sync|data)=/, '');
         const jsonStr = decodeURIComponent(escape(atob(cleanToken)));
         const parsed = JSON.parse(jsonStr);
         if (parsed && parsed.u) {
@@ -938,6 +944,7 @@
             name: parsed.n || parsed.u.split('@')[0],
             password: parsed.p || '',
             passwordHash: parsed.h || '',
+            data: parsed.d || null,
           };
         }
       } catch (e) {}
@@ -1219,13 +1226,13 @@
 
       const quickSyncToken = useMemo(() => {
         if (!currentUser) return '';
-        return generateQuickSyncToken(currentUser);
-      }, [currentUser]);
+        return generateQuickSyncToken(currentUser, { tasks, events, pomoSessions, settings });
+      }, [currentUser, tasks, events, pomoSessions, settings]);
 
       const phoneLoginLink = useMemo(() => {
         if (!currentUser) return '';
-        return generatePhoneLoginLink(currentUser);
-      }, [currentUser]);
+        return generatePhoneLoginLink(currentUser, { tasks, events, pomoSessions, settings });
+      }, [currentUser, tasks, events, pomoSessions, settings]);
 
       const importQuickSync = async (tokenStr) => {
         const parsed = parseQuickSyncToken(tokenStr);
@@ -1241,17 +1248,37 @@
         };
         setCurrentUser(sessionUser);
         setCurrentUserState(sessionUser);
-        showToast(`Đã liên kết với ${parsed.email}! Đang tải dữ liệu...`, 'info');
+
+        if (parsed.data) {
+          if (Array.isArray(parsed.data.tasks)) {
+            setTasks(parsed.data.tasks);
+            setUserData(parsed.email, 'tasks', parsed.data.tasks);
+          }
+          if (Array.isArray(parsed.data.events)) {
+            setEvents(parsed.data.events);
+            setUserData(parsed.email, 'events', parsed.data.events);
+          }
+          if (Array.isArray(parsed.data.pomoSessions)) {
+            setPomoSessions(parsed.data.pomoSessions);
+            setUserData(parsed.email, 'pomo_sessions', parsed.data.pomoSessions);
+          }
+          if (parsed.data.settings) {
+            setSettings(parsed.data.settings);
+            setUserData(parsed.email, 'settings', parsed.data.settings);
+          }
+        }
+
+        showToast(`Đã liên kết với ${parsed.email}! Dữ liệu đã đồng bộ hoàn tất.`, 'success');
         await syncWithCloud(true);
         return true;
       };
 
-      // URL Hash Auto-Login check on mount (e.g. #auth=... on phone)
+      // URL Hash Auto-Login check on mount (e.g. #sync=... on phone)
       useEffect(() => {
         try {
           const hash = window.location.hash;
-          if (hash && (hash.startsWith('#auth=') || hash.startsWith('#login=') || hash.startsWith('#sync='))) {
-            const token = hash.replace(/^#(auth|login|sync)=/, '');
+          if (hash && (hash.startsWith('#auth=') || hash.startsWith('#login=') || hash.startsWith('#sync=') || hash.startsWith('#data='))) {
+            const token = hash.replace(/^#(auth|login|sync|data)=/, '');
             const parsed = parseQuickSyncToken(token);
             if (parsed && parsed.email) {
               const sessionUser = {
@@ -1262,8 +1289,28 @@
               };
               setCurrentUser(sessionUser);
               setCurrentUserState(sessionUser);
+
+              if (parsed.data) {
+                if (Array.isArray(parsed.data.tasks)) {
+                  setTasks(parsed.data.tasks);
+                  setUserData(parsed.email, 'tasks', parsed.data.tasks);
+                }
+                if (Array.isArray(parsed.data.events)) {
+                  setEvents(parsed.data.events);
+                  setUserData(parsed.email, 'events', parsed.data.events);
+                }
+                if (Array.isArray(parsed.data.pomoSessions)) {
+                  setPomoSessions(parsed.data.pomoSessions);
+                  setUserData(parsed.email, 'pomo_sessions', parsed.data.pomoSessions);
+                }
+                if (parsed.data.settings) {
+                  setSettings(parsed.data.settings);
+                  setUserData(parsed.email, 'settings', parsed.data.settings);
+                }
+              }
+
               window.history.replaceState(null, '', window.location.pathname + window.location.search);
-              showToast(`Chào mừng bạn! Đã tự động đăng nhập "${parsed.email}".`, 'success', 5000);
+              showToast(`Đã tự động kết nối và đồng bộ "${parsed.email}" trên điện thoại!`, 'success', 5000);
               syncWithCloud(true);
             }
           }
@@ -1766,6 +1813,17 @@
                 </nav>
 
                 <div className="flex items-center gap-1.5 sm:gap-2.5">
+                  {isAccountLoggedIn && (
+                    <button
+                      onClick={() => setIsGoogleModalOpen(true)}
+                      title="Quét mã QR & Đồng bộ sang Điện Thoại"
+                      className="hidden sm:flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-900/50 text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition shadow-sm"
+                    >
+                      <span>📱</span>
+                      <span>Đồng Bộ Điện Thoại</span>
+                    </button>
+                  )}
+
                   <button
                     onClick={() => setIsGoogleModalOpen(true)}
                     title={isAccountLoggedIn ? `Tài khoản: ${currentUser?.email}` : 'Đăng nhập Gmail để đồng bộ đa thiết bị'}
@@ -4332,41 +4390,116 @@
                 </div>
               )}
 
-              {/* TAB 5: QUICK SYNC TOKEN IMPORT */}
+              {/* TAB 5: QUICK SYNC & PHONE QR PAIRING */}
               {activeTab === 'quicksync' && (
-                <form onSubmit={handleImportTokenSubmit} className="space-y-4">
-                  <div className="p-3.5 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-900/50">
-                    <div className="flex items-center gap-2 text-xs font-bold text-indigo-700 dark:text-indigo-300">
-                      <span>📱</span>
-                      <span>Liên kết thiết bị 1 chạm không cần nhập mật khẩu</span>
+                <div className="space-y-4">
+                  {isAccountLoggedIn ? (
+                    <div className="p-4 rounded-2xl bg-gradient-to-tr from-indigo-50/80 via-purple-50/60 to-slate-50/80 dark:from-indigo-950/40 dark:via-purple-950/30 dark:to-slate-900/40 border border-indigo-200/90 dark:border-indigo-900/60 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                            <span>📱</span>
+                            <span>Quét Mã QR Đồng Bộ Tức Thì Cho Điện Thoại</span>
+                          </h4>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Tài khoản: <strong className="text-indigo-600 dark:text-indigo-400">{currentUser.email}</strong>
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleCopyPhoneLink}
+                          className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow transition active:scale-95"
+                        >
+                          <span>{copiedPhoneLink ? '✓ Đã chép Link!' : '📋 Sao chép Link'}</span>
+                        </button>
+                      </div>
+
+                      {/* QR Code Graphic & Step Instructions */}
+                      <div className="flex flex-col sm:flex-row items-center gap-4 bg-white/90 dark:bg-slate-900/90 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
+                        <div className="p-2 rounded-2xl bg-white border border-slate-200 dark:border-slate-700 shadow-md shrink-0 flex flex-col items-center">
+                          <img
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=6&data=${encodeURIComponent(phoneLoginLink || window.location.href)}`}
+                            alt="QR Code Đồng Bộ Điện Thoại"
+                            className="w-36 h-36 sm:w-40 sm:h-40 rounded-xl"
+                          />
+                          <span className="text-[10px] font-bold text-slate-500 mt-1">Quét bằng Camera</span>
+                        </div>
+
+                        <div className="space-y-2 text-xs">
+                          <div className="flex items-start gap-2">
+                            <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">1</span>
+                            <p className="text-slate-700 dark:text-slate-300">
+                              <strong>Mở Camera trên Điện Thoại</strong> hoặc Zalo / Trình duyệt quét mã QR ở bên cạnh.
+                            </p>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">2</span>
+                            <p className="text-slate-700 dark:text-slate-300">
+                              Nhấn vào đường link mở trên điện thoại — ứng dụng sẽ <strong>tự động đăng nhập và tải 100% dữ liệu</strong>.
+                            </p>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">3</span>
+                            <p className="text-slate-700 dark:text-slate-300">
+                              Sau khi vào, bất kỳ lúc nào bạn thêm việc hay đổi lịch trên máy tính hoặc điện thoại, <strong>hai bên sẽ luôn đồng bộ với nhau!</strong>
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Direct Link Display */}
+                      <div className="p-2 rounded-xl bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 text-[10px] font-mono text-indigo-600 dark:text-indigo-400 truncate select-all">
+                        {phoneLoginLink || 'Đang tạo link đồng bộ...'}
+                      </div>
                     </div>
-                    <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                      Nếu bạn đã sao chép "Mã đồng bộ nhanh" hoặc "Link 1-chạm", hãy dán vào ô dưới đây để tự động kết nối tài khoản.
-                    </p>
-                  </div>
+                  ) : (
+                    <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-xs">
+                      <div className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5 mb-1">
+                        <span>⚠️</span>
+                        <span>Chưa Đăng Nhập Tài Khoản Trên Thiết Bị Này</span>
+                      </div>
+                      <p className="text-slate-600 dark:text-slate-400">
+                        Vui lòng chọn tab <strong>"Đăng Nhập Gmail"</strong> hoặc <strong>"Đăng Ký Mới"</strong> ở trên để tạo tài khoản trước, sau đó mã QR đồng bộ điện thoại sẽ xuất hiện tự động.
+                      </p>
+                    </div>
+                  )}
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Dán Mã / Link Đồng Bộ <span className="text-rose-500">*</span>
-                    </label>
-                    <textarea
-                      required
-                      rows={3}
-                      value={inputSyncToken}
-                      onChange={(e) => setInputSyncToken(e.target.value)}
-                      placeholder="Dán chuỗi mã hoặc link đồng bộ vào đây..."
-                      className="w-full p-3 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                    />
-                  </div>
+                  {/* Manual Code Input Form */}
+                  <form onSubmit={handleImportTokenSubmit} className="space-y-3.5 p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                        <span>🔄</span> Dán mã hoặc link ghép nối từ thiết bị khác
+                      </span>
+                      {isAccountLoggedIn && (
+                        <button
+                          type="button"
+                          onClick={handleCopySyncToken}
+                          className="text-xs text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
+                        >
+                          {copiedToken ? '✓ Đã chép mã' : 'Chép mã máy này'}
+                        </button>
+                      )}
+                    </div>
 
-                  <button
-                    type="submit"
-                    className="w-full py-3 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition active:scale-98"
-                  >
-                    <span>🔄</span>
-                    <span>Liên Kết Thiết Bị Ngay</span>
-                  </button>
-                </form>
+                    <div>
+                      <textarea
+                        required
+                        rows={2}
+                        value={inputSyncToken}
+                        onChange={(e) => setInputSyncToken(e.target.value)}
+                        placeholder="Dán chuỗi mã hoặc đường link từ máy tính/điện thoại kia vào đây..."
+                        className="w-full p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition active:scale-98"
+                    >
+                      Liên Kết & Đồng Bộ Thiết Bị Ngay
+                    </button>
+                  </form>
+                </div>
               )}
 
               {/* TAB 6: GOOGLE CLOUD OAUTH API */}

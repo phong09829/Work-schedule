@@ -211,12 +211,12 @@ export const AppProvider = ({ children }) => {
     }
   }, [currentUser, showToast]);
 
-  // Handle URL Hash Auto-Login (e.g. when opening 1-click pairing link on mobile)
+  // Handle URL Hash Auto-Login & Instant Cross-Device Data Hydration (e.g. when opening 1-click pairing link on mobile)
   useEffect(() => {
     try {
       const hash = window.location.hash;
-      if (hash && (hash.startsWith('#auth=') || hash.startsWith('#login=') || hash.startsWith('#sync='))) {
-        const token = hash.replace(/^#(auth|login|sync)=/, '');
+      if (hash && (hash.startsWith('#auth=') || hash.startsWith('#login=') || hash.startsWith('#sync=') || hash.startsWith('#data='))) {
+        const token = hash.replace(/^#(auth|login|sync|data)=/, '');
         const parsed = parseQuickSyncToken(token);
         if (parsed && parsed.email) {
           const sessionUser = {
@@ -227,10 +227,30 @@ export const AppProvider = ({ children }) => {
           };
           setCurrentUser(sessionUser);
           setCurrentUserState(sessionUser);
+
+          // If full dataset was bundled in the link, hydrate it immediately
+          if (parsed.data) {
+            if (Array.isArray(parsed.data.tasks)) {
+              setTasks(parsed.data.tasks);
+              setUserData(parsed.email, 'tasks', parsed.data.tasks);
+            }
+            if (Array.isArray(parsed.data.events)) {
+              setEvents(parsed.data.events);
+              setUserData(parsed.email, 'events', parsed.data.events);
+            }
+            if (Array.isArray(parsed.data.pomoSessions)) {
+              setPomoSessions(parsed.data.pomoSessions);
+              setUserData(parsed.email, 'pomo_sessions', parsed.data.pomoSessions);
+            }
+            if (parsed.data.settings) {
+              setSettings(parsed.data.settings);
+              setUserData(parsed.email, 'settings', parsed.data.settings);
+            }
+          }
           
           // Clear hash from URL cleanly
           window.history.replaceState(null, '', window.location.pathname + window.location.search);
-          showToast(`Chào mừng bạn! Đã tự động đăng nhập tài khoản "${parsed.email}" trên thiết bị này.`, 'success', 5000);
+          showToast(`Đã tự động kết nối và đồng bộ tài khoản "${parsed.email}" trên điện thoại!`, 'success', 5000);
           syncWithCloud(true);
         }
       }
@@ -445,11 +465,11 @@ export const AppProvider = ({ children }) => {
     return generateQuickSyncToken(currentUser, { tasks, events, pomoSessions, settings });
   }, [currentUser, tasks, events, pomoSessions, settings]);
 
-  // 1-Click Phone Link
+  // 1-Click Phone Link (Bundles current dataset for zero-latency phone hydration)
   const phoneLoginLink = useMemo(() => {
     if (!currentUser) return '';
-    return generatePhoneLoginLink(currentUser);
-  }, [currentUser]);
+    return generatePhoneLoginLink(currentUser, { tasks, events, pomoSessions, settings });
+  }, [currentUser, tasks, events, pomoSessions, settings]);
 
   // Quick Device Link: Import token from another device
   const importQuickSync = useCallback(async (tokenStr) => {
@@ -469,7 +489,26 @@ export const AppProvider = ({ children }) => {
     setCurrentUser(sessionUser);
     setCurrentUserState(sessionUser);
 
-    showToast(`Đã liên kết thiết bị với tài khoản ${parsed.email}! Đang tải dữ liệu...`, 'info');
+    if (parsed.data) {
+      if (Array.isArray(parsed.data.tasks)) {
+        setTasks(parsed.data.tasks);
+        setUserData(parsed.email, 'tasks', parsed.data.tasks);
+      }
+      if (Array.isArray(parsed.data.events)) {
+        setEvents(parsed.data.events);
+        setUserData(parsed.email, 'events', parsed.data.events);
+      }
+      if (Array.isArray(parsed.data.pomoSessions)) {
+        setPomoSessions(parsed.data.pomoSessions);
+        setUserData(parsed.email, 'pomo_sessions', parsed.data.pomoSessions);
+      }
+      if (parsed.data.settings) {
+        setSettings(parsed.data.settings);
+        setUserData(parsed.email, 'settings', parsed.data.settings);
+      }
+    }
+
+    showToast(`Đã liên kết thiết bị với tài khoản ${parsed.email}! Dữ liệu đã đồng bộ hoàn tất.`, 'success');
     await syncWithCloud(true);
     return true;
   }, [syncWithCloud, showToast]);

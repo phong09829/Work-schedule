@@ -524,6 +524,7 @@ export const pullUserDataFromCloud = async (user) => {
 
 /**
  * Quick Device Link: Generate a 1-click token for fast phone-to-computer pairing
+ * Bundles user credentials and current data payload so target device immediately has all data
  */
 export const generateQuickSyncToken = (user, data = null) => {
   if (!user || !user.email) return '';
@@ -533,6 +534,12 @@ export const generateQuickSyncToken = (user, data = null) => {
     h: user.passwordHash || '',
     p: user.password || '',
     t: Date.now(),
+    d: data ? {
+      tasks: data.tasks || [],
+      events: data.events || [],
+      pomoSessions: data.pomoSessions || [],
+      settings: data.settings || null,
+    } : null,
   };
   try {
     return btoa(unescape(encodeURIComponent(JSON.stringify(tokenData))));
@@ -542,13 +549,13 @@ export const generateQuickSyncToken = (user, data = null) => {
 };
 
 /**
- * Generate 1-Click Direct Login URL for Phone Browser
+ * Generate 1-Click Direct Login & Sync URL for Phone Browser
  */
-export const generatePhoneLoginLink = (user) => {
-  const token = generateQuickSyncToken(user);
+export const generatePhoneLoginLink = (user, data = null) => {
+  const token = generateQuickSyncToken(user, data);
   if (!token) return '';
-  const baseUrl = window.location.href.split('#')[0];
-  return `${baseUrl}#auth=${token}`;
+  const baseUrl = typeof window !== 'undefined' ? window.location.href.split('#')[0] : '';
+  return `${baseUrl}#sync=${token}`;
 };
 
 /**
@@ -557,7 +564,7 @@ export const generatePhoneLoginLink = (user) => {
 export const parseQuickSyncToken = (tokenStr) => {
   try {
     if (!tokenStr) return null;
-    const cleanToken = tokenStr.trim().replace(/^#auth=/, '').replace(/^#login=/, '').replace(/^#sync=/, '');
+    const cleanToken = tokenStr.trim().replace(/^#(auth|login|sync|data)=/, '');
     const jsonStr = decodeURIComponent(escape(atob(cleanToken)));
     const parsed = JSON.parse(jsonStr);
     if (parsed && parsed.u) {
@@ -566,6 +573,7 @@ export const parseQuickSyncToken = (tokenStr) => {
         name: parsed.n || parsed.u.split('@')[0],
         password: parsed.p || '',
         passwordHash: parsed.h || '',
+        data: parsed.d || null,
       };
     }
   } catch (e) {

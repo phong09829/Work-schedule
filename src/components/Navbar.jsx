@@ -102,6 +102,18 @@ export const Navbar = () => {
             {/* Right Quick Actions */}
             <div className="flex items-center gap-1.5 sm:gap-2.5">
               
+              {/* Phone Pairing Shortcut Button */}
+              {isAccountLoggedIn && (
+                <button
+                  onClick={() => setIsGoogleModalOpen(true)}
+                  title="Quét mã QR & Đồng bộ sang Điện Thoại"
+                  className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-900/50 text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition shadow-sm"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>Đồng Bộ Điện Thoại</span>
+                </button>
+              )}
+
               {/* Account & Cloud Sync Status Button */}
               <button
                 onClick={() => setIsGoogleModalOpen(true)}

@@ -1029,16 +1029,22 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
           {activeTab === 'quicksync' && (
             <div className="space-y-4">
               
-              {/* Option 1: 1-Click Phone Link (Best for mobile) */}
-              {isAccountLoggedIn && (
-                <div className="p-4 rounded-2xl bg-gradient-to-r from-brand-50/70 via-purple-50/50 to-indigo-50/70 dark:from-brand-950/30 dark:via-purple-950/20 dark:to-indigo-950/30 border border-brand-200/80 dark:border-brand-900/50 space-y-3">
+              {/* Option 1: Live QR Code & 1-Click Phone Pairing */}
+              {isAccountLoggedIn ? (
+                <div className="p-4 rounded-2xl bg-gradient-to-tr from-brand-50/80 via-purple-50/60 to-indigo-50/80 dark:from-brand-950/40 dark:via-purple-950/30 dark:to-indigo-950/40 border border-brand-200/90 dark:border-brand-900/60 space-y-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Smartphone className="w-5 h-5 text-brand-600 dark:text-brand-400" />
-                      <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                        Link Đăng Nhập 1-Chạm Cho Điện Thoại
-                      </span>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                          Quét Mã QR Đồng Bộ Tức Thì Cho Điện Thoại
+                        </h4>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Tài khoản: <strong className="text-brand-600 dark:text-brand-400">{currentUser.email}</strong>
+                        </p>
+                      </div>
                     </div>
+
                     <button
                       type="button"
                       onClick={handleCopyPhoneLink}
@@ -1048,8 +1054,53 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                       <span>{copiedPhoneLink ? 'Đã sao chép Link!' : 'Sao chép Link'}</span>
                     </button>
                   </div>
-                  <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                    Chỉ cần copy đường link này và gửi sang Zalo / Messenger / Tin nhắn rồi mở trên điện thoại. Ứng dụng sẽ tự động đăng nhập và tải dữ liệu ngay lập tức!
+
+                  {/* QR Code Graphic & Step Instructions */}
+                  <div className="flex flex-col sm:flex-row items-center gap-4 bg-white/90 dark:bg-slate-900/90 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
+                    <div className="p-2 rounded-2xl bg-white border border-slate-200 dark:border-slate-700 shadow-md shrink-0 flex flex-col items-center">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=6&data=${encodeURIComponent(phoneLoginLink || window.location.href)}`}
+                        alt="QR Code Đồng Bộ Điện Thoại"
+                        className="w-36 h-36 sm:w-40 sm:h-40 rounded-xl"
+                      />
+                      <span className="text-[10px] font-bold text-slate-500 mt-1">Quét bằng Camera</span>
+                    </div>
+
+                    <div className="space-y-2 text-xs">
+                      <div className="flex items-start gap-2">
+                        <span className="w-5 h-5 rounded-full bg-brand-500 text-white font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">1</span>
+                        <p className="text-slate-700 dark:text-slate-300">
+                          <strong>Mở Camera trên Điện Thoại</strong> hoặc Zalo / Trình duyệt quét mã QR ở bên cạnh.
+                        </p>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <span className="w-5 h-5 rounded-full bg-brand-500 text-white font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">2</span>
+                        <p className="text-slate-700 dark:text-slate-300">
+                          Nhấn vào đường link mở trên điện thoại — ứng dụng sẽ <strong>tự động đăng nhập và tải 100% dữ liệu</strong>.
+                        </p>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <span className="w-5 h-5 rounded-full bg-emerald-500 text-white font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">3</span>
+                        <p className="text-slate-700 dark:text-slate-300">
+                          Sau khi vào, bất kỳ lúc nào bạn thêm việc hay đổi lịch trên máy tính hoặc điện thoại, <strong>hai bên sẽ luôn đồng bộ với nhau!</strong>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Direct Link Display */}
+                  <div className="p-2 rounded-xl bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 text-[10px] font-mono text-brand-600 dark:text-brand-400 truncate select-all">
+                    {phoneLoginLink || 'Đang tạo link đồng bộ...'}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-xs">
+                  <div className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5 mb-1">
+                    <AlertCircle className="w-4 h-4" />
+                    <span>Chưa Đăng Nhập Tài Khoản Trên Thiết Bị Này</span>
+                  </div>
+                  <p className="text-slate-600 dark:text-slate-400">
+                    Vui lòng chọn tab <strong>"Đăng Nhập Gmail"</strong> hoặc <strong>"Đăng Ký Tài Khoản"</strong> ở trên để tạo tài khoản trước, sau đó mã QR đồng bộ điện thoại sẽ xuất hiện tự động.
                   </p>
                 </div>
               )}
@@ -1059,7 +1110,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                     <ArrowRightLeft className="w-4 h-4 text-indigo-500" />
-                    Nhập mã ghép nối từ thiết bị khác
+                    Dán mã hoặc link ghép nối từ thiết bị khác
                   </span>
                   {isAccountLoggedIn && (
                     <button
@@ -1079,7 +1130,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     rows={2}
                     value={inputSyncToken}
                     onChange={(e) => setInputSyncToken(e.target.value)}
-                    placeholder="Dán mã ghép nối từ máy tính/điện thoại kia vào đây..."
+                    placeholder="Dán chuỗi mã hoặc đường link từ máy tính/điện thoại kia vào đây..."
                     className="w-full p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
                   />
                 </div>
@@ -1100,7 +1151,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     Sao Lưu File Dữ Liệu (.json)
                   </span>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    Tải về toàn bộ công việc và lịch trình thành 1 file offline.
+                    Tải về toàn bộ công việc và lịch trình thành 1 file offline an toàn.
                   </p>
                 </div>
                 <button
