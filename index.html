@@ -41,8 +41,7 @@
     }
   </script>
 
-  <!-- Google Identity Services (Sign in with Google & OAuth 2.0) -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
 
   <!-- React 18 & Babel CDN -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -2004,17 +2003,6 @@
                 </nav>
 
                 <div className="flex items-center gap-1.5 sm:gap-2.5">
-                  {isAccountLoggedIn && (
-                    <button
-                      onClick={() => setIsGoogleModalOpen(true)}
-                      title="Quét mã QR & Đồng bộ sang Điện Thoại"
-                      className="hidden sm:flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-900/50 text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition shadow-sm"
-                    >
-                      <span>📱</span>
-                      <span>Đồng Bộ Điện Thoại</span>
-                    </button>
-                  )}
-
                   <button
                     onClick={() => setIsGoogleModalOpen(true)}
                     title={isAccountLoggedIn ? `Tài khoản: ${currentUser?.email}` : 'Đăng nhập Gmail để đồng bộ đa thiết bị'}
@@ -3926,47 +3914,17 @@
             </div>
 
             {/* Dynamic Navigation Tabs */}
-            <div className="p-2 sm:p-3 bg-slate-100/70 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
-              <div className="flex p-1 rounded-2xl bg-slate-200/80 dark:bg-slate-950/80 border border-slate-300/40 dark:border-slate-800 min-w-max sm:min-w-0">
+            <div className="p-2 sm:p-3 bg-slate-100/70 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex p-1 rounded-2xl bg-slate-200/80 dark:bg-slate-950/80 border border-slate-300/40 dark:border-slate-800">
                 {isAccountLoggedIn ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('profile')}
-                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                        activeTab === 'profile'
-                          ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                      }`}
-                    >
-                      <span>👤</span>
-                      <span>Hồ Sơ & Đám Mây</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('quicksync')}
-                      className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                        activeTab === 'quicksync'
-                          ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                      }`}
-                    >
-                      <span>📱</span>
-                      <span>Link Cho Điện Thoại</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('google_api')}
-                      className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                        activeTab === 'google_api'
-                          ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                      }`}
-                    >
-                      <span>🔑</span>
-                      <span>Google Calendar API</span>
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('profile')}
+                    className="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                  >
+                    <span>👤</span>
+                    <span>Hồ Sơ & Đám Mây</span>
+                  </button>
                 ) : (
                   <>
                     <button
@@ -3979,7 +3937,7 @@
                       }`}
                     >
                       <span>✉️</span>
-                      <span>Đăng Nhập Gmail</span>
+                      <span>Đăng Nhập</span>
                     </button>
                     <button
                       type="button"
@@ -3999,7 +3957,7 @@
                         setResetEmail(loginEmail);
                         setActiveTab('reset_password');
                       }}
-                      className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
                         activeTab === 'reset_password'
                           ? 'bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 shadow-sm'
                           : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -4007,18 +3965,6 @@
                     >
                       <span>🔑</span>
                       <span>Đặt Lại Mật Khẩu</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('quicksync')}
-                      className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                        activeTab === 'quicksync'
-                          ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                      }`}
-                    >
-                      <span>📲</span>
-                      <span>Nhập Mã Đồng Bộ</span>
                     </button>
                   </>
                 )}
@@ -4402,7 +4348,7 @@
                   <div className="p-4 rounded-2xl border bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                        <span>☁️</span> Đồng Bộ Đám Mây Toàn Diện
+                        <span>☁️</span> Đồng Bộ Đám Mây Toàn Cầu
                       </span>
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -4463,29 +4409,6 @@
                     <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between">
                       <span>Lần đồng bộ gần nhất:</span>
                       <span className="font-mono text-slate-600 dark:text-slate-300 font-semibold">{formatTimeStr(lastCloudSyncTime)}</span>
-                    </div>
-                  </div>
-
-                  {/* 1-Click Phone Link Generator */}
-                  <div className="p-4 rounded-2xl border border-indigo-200/80 dark:border-indigo-900/50 bg-gradient-to-r from-indigo-50/70 via-purple-50/50 to-slate-50/70 dark:from-indigo-950/30 dark:via-purple-950/20 dark:to-slate-900/40">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span>📱</span>
-                        <span className="text-xs font-bold text-slate-900 dark:text-slate-100">Link Đăng Nhập 1-Chạm Cho Điện Thoại</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleCopyPhoneLink}
-                        className="px-3 py-1 rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 text-xs font-bold transition shadow-sm"
-                      >
-                        {copiedPhoneLink ? '✓ Đã chép link!' : '📋 Sao chép Link'}
-                      </button>
-                    </div>
-                    <p className="text-[11px] text-slate-600 dark:text-slate-400 mb-2">
-                      Gửi link này qua Zalo/Messenger sang điện thoại. Chỉ cần bấm vào link là điện thoại tự động đăng nhập tài khoản <strong>{currentUser.email}</strong> ngay!
-                    </p>
-                    <div className="p-2 rounded-xl bg-white/80 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 text-[10px] font-mono text-indigo-600 dark:text-indigo-400 truncate select-all">
-                      {phoneLoginLink || 'Đang tạo link...'}
                     </div>
                   </div>
 
@@ -4578,192 +4501,6 @@
                       </button>
                     </div>
                   </form>
-                </div>
-              )}
-
-              {/* TAB 5: QUICK SYNC & PHONE QR PAIRING */}
-              {activeTab === 'quicksync' && (
-                <div className="space-y-4">
-                  {isAccountLoggedIn ? (
-                    <div className="p-4 rounded-2xl bg-gradient-to-tr from-indigo-50/80 via-purple-50/60 to-slate-50/80 dark:from-indigo-950/40 dark:via-purple-950/30 dark:to-slate-900/40 border border-indigo-200/90 dark:border-indigo-900/60 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                            <span>📱</span>
-                            <span>Quét Mã QR Đồng Bộ Tức Thì Cho Điện Thoại</span>
-                          </h4>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                            Tài khoản: <strong className="text-indigo-600 dark:text-indigo-400">{currentUser.email}</strong>
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={handleCopyPhoneLink}
-                          className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow transition active:scale-95"
-                        >
-                          <span>{copiedPhoneLink ? '✓ Đã chép Link!' : '📋 Sao chép Link'}</span>
-                        </button>
-                      </div>
-
-                      {/* QR Code Graphic & Step Instructions */}
-                      <div className="flex flex-col sm:flex-row items-center gap-4 bg-white/90 dark:bg-slate-900/90 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
-                        <div className="p-2 rounded-2xl bg-white border border-slate-200 dark:border-slate-700 shadow-md shrink-0 flex flex-col items-center">
-                          <img
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=6&data=${encodeURIComponent(phoneLoginLink || window.location.href)}`}
-                            alt="QR Code Đồng Bộ Điện Thoại"
-                            className="w-36 h-36 sm:w-40 sm:h-40 rounded-xl"
-                          />
-                          <span className="text-[10px] font-bold text-slate-500 mt-1">Quét bằng Camera</span>
-                        </div>
-
-                        <div className="space-y-2 text-xs">
-                          <div className="flex items-start gap-2">
-                            <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">1</span>
-                            <p className="text-slate-700 dark:text-slate-300">
-                              <strong>Mở Camera trên Điện Thoại</strong> hoặc Zalo / Trình duyệt quét mã QR ở bên cạnh.
-                            </p>
-                          </div>
-                          <div className="flex items-start gap-2">
-                            <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">2</span>
-                            <p className="text-slate-700 dark:text-slate-300">
-                              Nhấn vào đường link mở trên điện thoại — ứng dụng sẽ <strong>tự động đăng nhập và tải 100% dữ liệu</strong>.
-                            </p>
-                          </div>
-                          <div className="flex items-start gap-2">
-                            <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">3</span>
-                            <p className="text-slate-700 dark:text-slate-300">
-                              Sau khi vào, bất kỳ lúc nào bạn thêm việc hay đổi lịch trên máy tính hoặc điện thoại, <strong>hai bên sẽ luôn đồng bộ với nhau!</strong>
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Direct Link Display */}
-                      <div className="p-2 rounded-xl bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 text-[10px] font-mono text-indigo-600 dark:text-indigo-400 truncate select-all">
-                        {phoneLoginLink || 'Đang tạo link đồng bộ...'}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-xs">
-                      <div className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5 mb-1">
-                        <span>⚠️</span>
-                        <span>Chưa Đăng Nhập Tài Khoản Trên Thiết Bị Này</span>
-                      </div>
-                      <p className="text-slate-600 dark:text-slate-400">
-                        Vui lòng chọn tab <strong>"Đăng Nhập Gmail"</strong> hoặc <strong>"Đăng Ký Mới"</strong> ở trên để tạo tài khoản trước, sau đó mã QR đồng bộ điện thoại sẽ xuất hiện tự động.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Manual Code Input Form */}
-                  <form onSubmit={handleImportTokenSubmit} className="space-y-3.5 p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                        <span>🔄</span> Dán mã hoặc link ghép nối từ thiết bị khác
-                      </span>
-                      {isAccountLoggedIn && (
-                        <button
-                          type="button"
-                          onClick={handleCopySyncToken}
-                          className="text-xs text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
-                        >
-                          {copiedToken ? '✓ Đã chép mã' : 'Chép mã máy này'}
-                        </button>
-                      )}
-                    </div>
-
-                    <div>
-                      <textarea
-                        required
-                        rows={2}
-                        value={inputSyncToken}
-                        onChange={(e) => setInputSyncToken(e.target.value)}
-                        placeholder="Dán chuỗi mã hoặc đường link từ máy tính/điện thoại kia vào đây..."
-                        className="w-full p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                      />
-                    </div>
-
-                    <button
-                      type="submit"
-                      className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition active:scale-98"
-                    >
-                      Liên Kết & Đồng Bộ Thiết Bị Ngay
-                    </button>
-                  </form>
-                </div>
-              )}
-
-              {/* TAB 6: GOOGLE CLOUD OAUTH API */}
-              {activeTab === 'google_api' && (
-                <div className="space-y-4">
-                  <div className="p-3.5 rounded-2xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/40">
-                    <div className="flex items-center gap-2 text-xs font-bold text-blue-700 dark:text-blue-300">
-                      <span>🔄</span>
-                      <span>Đồng bộ 2 chiều thời gian thực với Google Calendar API</span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                      Tùy chọn kết nối với Google Cloud Console để đồng bộ sự kiện giữa Web và app Google Calendar trên điện thoại của bạn.
-                    </p>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
-                        <span>Google OAuth Client ID</span>
-                        <a
-                          href="https://console.cloud.google.com/apis/credentials"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-indigo-600 dark:text-indigo-400 hover:underline text-[11px] font-semibold"
-                        >
-                          Lấy ID tại Google Cloud ↗
-                        </a>
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={inputVal}
-                          onChange={(e) => setInputVal(e.target.value)}
-                          placeholder="VD: 123456789-abcdef.apps.googleusercontent.com"
-                          className="flex-1 px-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-slate-100"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => { onSaveClientId(inputVal.trim()); showToast('Đã lưu Client ID!', 'success'); }}
-                          className="px-4 py-2.5 rounded-xl bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-xs font-bold transition"
-                        >
-                          Lưu
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {!isGoogleConnected && (
-                    <button
-                      type="button"
-                      onClick={triggerGISLogin}
-                      className="w-full py-3 px-4 rounded-2xl bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-100 font-bold text-xs shadow-md flex items-center justify-center gap-2 transition active:scale-98"
-                    >
-                      <span>🌐</span>
-                      <span>Xác Thực OAuth Qua Google GIS Client</span>
-                    </button>
-                  )}
-
-                  <div className="p-3.5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/40 space-y-1.5 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-indigo-900 dark:text-indigo-300">Origin URL (Thêm vào Google Console):</span>
-                      <button
-                        type="button"
-                        onClick={handleCopyOrigin}
-                        className="px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-bold"
-                      >
-                        {copied ? '✓ Đã chép' : '📋 Sao chép'}
-                      </button>
-                    </div>
-                    <code className="block bg-slate-200 dark:bg-slate-800 p-1.5 rounded font-mono text-[10px] text-indigo-600 dark:text-indigo-400 overflow-x-auto">
-                      {window.location.origin}
-                    </code>
-                  </div>
                 </div>
               )}
 

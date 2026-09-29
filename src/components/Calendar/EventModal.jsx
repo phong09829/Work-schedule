@@ -23,7 +23,7 @@ export const EventModal = ({
   initialDate = null,
   initialHour = 9,
 }) => {
-  const { addEvent, updateEvent, deleteEvent, linkEventToPomodoro, isGoogleConnected, currentUser } = useApp();
+  const { addEvent, updateEvent, deleteEvent, linkEventToPomodoro, currentUser } = useApp();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -98,7 +98,7 @@ export const EventModal = ({
   };
 
   const handleDelete = () => {
-    if (eventToEdit && window.confirm(`Bạn có chắc chắn muốn xóa sự kiện "${eventToEdit.title}"? Thao tác này cũng sẽ xóa trên Google Calendar nếu đã đồng bộ.`)) {
+    if (eventToEdit && window.confirm(`Bạn có chắc chắn muốn xóa sự kiện "${eventToEdit.title}"?`)) {
       deleteEvent(eventToEdit.id);
       onClose();
     }
@@ -134,10 +134,6 @@ export const EventModal = ({
                 {currentUser?.email ? (
                   <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold font-mono">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Lưu vào tài khoản: {currentUser.email}
-                  </span>
-                ) : isGoogleConnected ? (
-                  <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
-                    <RefreshCw className="w-3 h-3 animate-spin-slow" /> Tự động đồng bộ 2 chiều với Google Calendar
                   </span>
                 ) : (
                   <span>Lưu trữ nội bộ • Đăng nhập để lưu theo tài khoản Gmail</span>

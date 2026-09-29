@@ -31,11 +31,6 @@ export const CalendarView = () => {
     events,
     currentUser,
     isAccountLoggedIn,
-    isGoogleConnected,
-    googleUser,
-    syncWithGoogleCalendar,
-    isGoogleSyncing,
-    lastSyncTime,
   } = useApp();
 
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -136,32 +131,16 @@ export const CalendarView = () => {
         <div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight flex items-center gap-2.5">
             <CalendarIcon className="w-7 h-7 text-brand-500" />
-            <span>Lịch Trình & Google Calendar</span>
+            <span>Lịch Trình Biểu & Thời Gian Biểu</span>
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-2">
             <span>Tự động lưu lại mọi chỉnh sửa lịch trình theo từng tài khoản Gmail</span>
-            {isGoogleConnected && (
-              <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Google Sync Active
-              </span>
-            )}
           </p>
         </div>
 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Sync Now Button */}
-          <button
-            onClick={() => syncWithGoogleCalendar()}
-            disabled={isGoogleSyncing}
-            className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-bold text-xs shadow-sm transition active:scale-95 disabled:opacity-60"
-            title="Đồng bộ ngay với Google Calendar"
-          >
-            <RefreshCw className={`w-4 h-4 text-brand-500 ${isGoogleSyncing ? 'animate-spin' : ''}`} />
-            <span>{isGoogleSyncing ? 'Đang đồng bộ...' : 'Đồng bộ Google'}</span>
-          </button>
-
-          {/* Account / Google Modal Button */}
+          {/* Account / Auth Modal Button */}
           <button
             onClick={() => setIsGoogleModalOpen(true)}
             className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border font-bold text-xs shadow-sm transition active:scale-95 ${
