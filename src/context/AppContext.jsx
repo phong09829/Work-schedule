@@ -24,6 +24,8 @@ import {
   parseQuickSyncToken,
   exportFullBackup,
   normalizeEmail,
+  getUserCloudKey,
+  subscribeToCloudEvents,
   CLOUD_STORAGE_KEYS
 } from '../utils/cloudSync';
 import { soundManager } from '../utils/audio';
@@ -290,6 +292,42 @@ export const AppProvider = ({ children }) => {
       clearInterval(interval);
     };
   }, [currentUser?.email, syncWithCloud, showToast]);
+
+  // Realtime Live Cloud Sync Subscription between Phone and PC (Instant 2-way reflection)
+  useEffect(() => {
+    if (!currentUser || !currentUser.email) return;
+
+    let unsub = () => {};
+    getUserCloudKey(currentUser.email).then(cloudKey => {
+      unsub = subscribeToCloudEvents(cloudKey, (remoteDoc) => {
+        if (remoteDoc && remoteDoc.data) {
+          const d = remoteDoc.data;
+          if (Array.isArray(d.tasks)) {
+            setTasks(d.tasks);
+            setUserData(currentUser.email, 'tasks', d.tasks);
+          }
+          if (Array.isArray(d.events)) {
+            setEvents(d.events);
+            setUserData(currentUser.email, 'events', d.events);
+          }
+          if (Array.isArray(d.pomoSessions)) {
+            setPomoSessions(d.pomoSessions);
+            setUserData(currentUser.email, 'pomo_sessions', d.pomoSessions);
+          }
+          if (d.settings) {
+            setSettings(d.settings);
+            setUserData(currentUser.email, 'settings', d.settings);
+          }
+          setLastCloudSyncTime(new Date().toISOString());
+          setCloudSyncStatus('synced');
+        }
+      });
+    });
+
+    return () => {
+      unsub();
+    };
+  }, [currentUser?.email]);
 
   // --- Multi-Account Authentication Handlers ---
 

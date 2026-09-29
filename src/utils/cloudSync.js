@@ -72,21 +72,20 @@ export const getUserCloudKey = async (email) => {
 };
 
 /**
- * Save JSON document to Local Cloud Cache and Web Storage Relay
+ * Save JSON document to Global Cloud Server and Local Cloud Cache
+ * Ensures ANY device (Phone, PC, Tablet) can access this account worldwide
  */
 export const saveToCloudRemote = async (key, data) => {
   const payload = JSON.stringify(data);
-  let savedLocally = false;
 
   // 1. Always save to Local Cloud Cache
   try {
     localStorage.setItem(`cloud_cache_${key}`, payload);
-    savedLocally = true;
   } catch (e) {
     console.warn('Local cloud cache write warning:', e);
   }
 
-  // 2. Also mirror into registered users array if it contains user info
+  // 2. Mirror into registered users array if it contains user info
   if (data && data.email) {
     const cleanEmail = normalizeEmail(data.email);
     const users = getRegisteredUsers();
@@ -110,14 +109,84 @@ export const saveToCloudRemote = async (key, data) => {
     saveRegisteredUsers(users);
   }
 
-  return savedLocally;
+  // 3. Real Global Cloud Relay Push (Multi-Device Worldwide Sync)
+  try {
+    const cloudTopic = `ff_${key}`;
+    await fetch(`https://ntfy.sh/${cloudTopic}`, {
+      method: 'POST',
+      body: payload,
+      headers: {
+        'Title': 'FocusFlow Cloud Sync',
+        'Priority': 'default',
+        'Tags': 'cloud_sync,focusflow'
+      },
+    });
+  } catch (cloudErr) {
+    console.warn('Real cloud push warning:', cloudErr);
+  }
+
+  return true;
 };
 
 /**
- * Load JSON document from Local Cloud Cache and Multi-Device Storage
+ * Load JSON document from Global Cloud Server and Local Cloud Cache
+ * Fetches latest updates from cloud server so phone gets data from PC and vice versa
  */
 export const loadFromCloudRemote = async (key) => {
-  // 1. Check local cloud cache
+  let cloudRecord = null;
+
+  // 1. Fetch latest state from Real Global Cloud Server
+  try {
+    const cloudTopic = `ff_${key}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+    const res = await fetch(`https://ntfy.sh/${cloudTopic}/json?poll=1`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const text = await res.text();
+      if (text && text.trim()) {
+        const lines = text.trim().split('\n');
+        for (let i = lines.length - 1; i >= 0; i--) {
+          try {
+            const item = JSON.parse(lines[i]);
+            if (item && item.message) {
+              const parsedDoc = JSON.parse(item.message);
+              if (parsedDoc && (parsedDoc.email || parsedDoc.data)) {
+                cloudRecord = parsedDoc;
+                break;
+              }
+            }
+          } catch (_) {}
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Real cloud fetch (offline or timeout):', err);
+  }
+
+  // 2. If fetched from cloud, cache locally and sync user catalog
+  if (cloudRecord) {
+    try {
+      localStorage.setItem(`cloud_cache_${key}`, JSON.stringify(cloudRecord));
+      if (cloudRecord.email) {
+        const users = getRegisteredUsers();
+        const existingIdx = users.findIndex(u => normalizeEmail(u.email) === normalizeEmail(cloudRecord.email));
+        if (existingIdx >= 0) {
+          users[existingIdx] = { ...users[existingIdx], ...cloudRecord };
+        } else {
+          users.push(cloudRecord);
+        }
+        saveRegisteredUsers(users);
+      }
+    } catch (_) {}
+    return cloudRecord;
+  }
+
+  // 3. Fallback to local cloud cache
   try {
     const cached = localStorage.getItem(`cloud_cache_${key}`);
     if (cached) {
@@ -127,6 +196,35 @@ export const loadFromCloudRemote = async (key) => {
   } catch (_) {}
 
   return null;
+};
+
+/**
+ * Real-Time SSE Cloud Listener: Notifies when another device makes changes
+ */
+export const subscribeToCloudEvents = (key, onUpdate) => {
+  if (typeof window === 'undefined' || !window.EventSource) return () => {};
+  try {
+    const cloudTopic = `ff_${key}`;
+    const es = new EventSource(`https://ntfy.sh/${cloudTopic}/sse`);
+    
+    es.onmessage = (e) => {
+      try {
+        const msgObj = JSON.parse(e.data);
+        if (msgObj && msgObj.message) {
+          const doc = JSON.parse(msgObj.message);
+          if (doc && (doc.email || doc.data)) {
+            onUpdate(doc);
+          }
+        }
+      } catch (_) {}
+    };
+
+    return () => {
+      es.close();
+    };
+  } catch (e) {
+    return () => {};
+  }
 };
 
 /**
