@@ -117,7 +117,8 @@ export const saveToCloudRemote = async (key, data) => {
       body: payload,
       headers: {
         'Title': 'FocusFlow Cloud Sync',
-        'Priority': 'default',
+        'Filename': 'data.json',
+        'Priority': 'urgent',
         'Tags': 'cloud_sync,focusflow'
       },
     });
@@ -135,13 +136,13 @@ export const saveToCloudRemote = async (key, data) => {
 export const loadFromCloudRemote = async (key) => {
   let cloudRecord = null;
 
-  // 1. Fetch latest state from Real Global Cloud Server
+  // 1. Fetch latest state from Real Global Cloud Server (with since=all and attachment resolution)
   try {
     const cloudTopic = `ff_${key}`;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    const res = await fetch(`https://ntfy.sh/${cloudTopic}/json?poll=1`, {
+    const res = await fetch(`https://ntfy.sh/${cloudTopic}/json?poll=1&since=all`, {
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -149,23 +150,37 @@ export const loadFromCloudRemote = async (key) => {
     if (res.ok) {
       const text = await res.text();
       if (text && text.trim()) {
-        const lines = text.trim().split('\n');
+        const lines = text.trim().split('\n').filter(Boolean);
         for (let i = lines.length - 1; i >= 0; i--) {
           try {
             const item = JSON.parse(lines[i]);
-            if (item && item.message) {
-              const parsedDoc = JSON.parse(item.message);
-              if (parsedDoc && (parsedDoc.email || parsedDoc.data)) {
-                cloudRecord = parsedDoc;
-                break;
+            // Check if payload is stored in attachment file (for large payloads > 4KB)
+            if (item && item.attachment && item.attachment.url) {
+              const fileRes = await fetch(item.attachment.url);
+              if (fileRes.ok) {
+                const doc = await fileRes.json();
+                if (doc && (doc.email || doc.data)) {
+                  cloudRecord = doc;
+                  break;
+                }
               }
+            }
+            // Check direct inline JSON message
+            if (item && item.message) {
+              try {
+                const parsedDoc = JSON.parse(item.message);
+                if (parsedDoc && (parsedDoc.email || parsedDoc.data)) {
+                  cloudRecord = parsedDoc;
+                  break;
+                }
+              } catch (_) {}
             }
           } catch (_) {}
         }
       }
     }
   } catch (err) {
-    console.warn('Real cloud fetch (offline or timeout):', err);
+    console.warn('Real cloud fetch warning:', err);
   }
 
   // 2. If fetched from cloud, cache locally and sync user catalog
@@ -207,13 +222,25 @@ export const subscribeToCloudEvents = (key, onUpdate) => {
     const cloudTopic = `ff_${key}`;
     const es = new EventSource(`https://ntfy.sh/${cloudTopic}/sse`);
     
-    es.onmessage = (e) => {
+    es.onmessage = async (e) => {
       try {
         const msgObj = JSON.parse(e.data);
-        if (msgObj && msgObj.message) {
-          const doc = JSON.parse(msgObj.message);
-          if (doc && (doc.email || doc.data)) {
-            onUpdate(doc);
+        if (msgObj) {
+          if (msgObj.attachment && msgObj.attachment.url) {
+            const fileRes = await fetch(msgObj.attachment.url);
+            if (fileRes.ok) {
+              const doc = await fileRes.json();
+              if (doc && (doc.email || doc.data)) {
+                onUpdate(doc);
+                return;
+              }
+            }
+          }
+          if (msgObj.message) {
+            const doc = JSON.parse(msgObj.message);
+            if (doc && (doc.email || doc.data)) {
+              onUpdate(doc);
+            }
           }
         }
       } catch (_) {}
@@ -241,20 +268,34 @@ export const registerCloudAccount = async ({ email, password, name, initialData 
 
   const cloudKey = await getUserCloudKey(cleanEmail);
   const passwordHash = await hashPassword(password);
+  const enteredPlain = password.trim();
 
-  // Check if user already exists in local list or cloud
+  // Check if user already exists on Cloud or local list
+  const existingCloud = await loadFromCloudRemote(cloudKey);
   const existingLocal = findUserByEmail(cleanEmail);
-  if (existingLocal && (existingLocal.password || existingLocal.passwordHash)) {
+  const existing = existingCloud || existingLocal;
+
+  if (existing && (existing.password || existing.passwordHash)) {
+    // If password matches, automatically log in and sync!
+    const isMatch = 
+      (existing.password && existing.password === enteredPlain) ||
+      (existing.passwordHash && existing.passwordHash === passwordHash) ||
+      (existing.password && (await hashPassword(existing.password)) === passwordHash);
+
+    if (isMatch) {
+      return loginCloudAccount({ email: cleanEmail, password: enteredPlain });
+    }
+
     return {
       ok: false,
       errorType: 'EMAIL_EXISTS',
-      message: `Tài khoản Gmail "${cleanEmail}" đã được tạo trước đó! Bạn có thể chuyển sang tab Đăng Nhập để vào tài khoản.`
+      message: `Tài khoản Gmail "${cleanEmail}" đã được tạo trước đó trên hệ thống! Vui lòng chuyển sang tab "Đăng Nhập" để vào tài khoản.`
     };
   }
 
   const displayName = name && name.trim()
     ? name.trim()
-    : (existingLocal?.name || cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()));
+    : (existing?.name || cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()));
 
   const defaultDataset = initialData || {
     tasks: DEFAULT_TASKS,
@@ -652,7 +693,21 @@ export const generateQuickSyncToken = (user, data = null) => {
 export const generatePhoneLoginLink = (user, data = null) => {
   const token = generateQuickSyncToken(user, data);
   if (!token) return '';
-  const baseUrl = typeof window !== 'undefined' ? window.location.href.split('#')[0] : '';
+  let baseUrl = '';
+  if (typeof window !== 'undefined') {
+    const isLocal = 
+      window.location.hostname === 'localhost' || 
+      window.location.hostname === '127.0.0.1' || 
+      window.location.protocol === 'file:';
+      
+    if (isLocal) {
+      baseUrl = 'https://phong09829.github.io/Work-schedule/';
+    } else {
+      baseUrl = window.location.href.split('#')[0];
+    }
+  } else {
+    baseUrl = 'https://phong09829.github.io/Work-schedule/';
+  }
   return `${baseUrl}#sync=${token}`;
 };
 

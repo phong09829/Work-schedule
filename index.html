@@ -585,7 +585,8 @@
           body: payload,
           headers: {
             'Title': 'FocusFlow Cloud Sync',
-            'Priority': 'default',
+            'Filename': 'data.json',
+            'Priority': 'urgent',
             'Tags': 'cloud_sync,focusflow'
           },
         });
@@ -599,13 +600,13 @@
     const loadFromCloudRemote = async (key) => {
       let cloudRecord = null;
 
-      // 1. Fetch from Global Cloud Server
+      // 1. Fetch from Global Cloud Server (with since=all & attachment file support for large datasets)
       try {
         const cloudTopic = `ff_${key}`;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-        const res = await fetch(`https://ntfy.sh/${cloudTopic}/json?poll=1`, {
+        const res = await fetch(`https://ntfy.sh/${cloudTopic}/json?poll=1&since=all`, {
           signal: controller.signal,
         });
         clearTimeout(timeoutId);
@@ -613,23 +614,37 @@
         if (res.ok) {
           const text = await res.text();
           if (text && text.trim()) {
-            const lines = text.trim().split('\n');
+            const lines = text.trim().split('\n').filter(Boolean);
             for (let i = lines.length - 1; i >= 0; i--) {
               try {
                 const item = JSON.parse(lines[i]);
-                if (item && item.message) {
-                  const parsedDoc = JSON.parse(item.message);
-                  if (parsedDoc && (parsedDoc.email || parsedDoc.data)) {
-                    cloudRecord = parsedDoc;
-                    break;
+                // Check if payload is stored in attachment file (for large payloads > 4KB)
+                if (item && item.attachment && item.attachment.url) {
+                  const fileRes = await fetch(item.attachment.url);
+                  if (fileRes.ok) {
+                    const doc = await fileRes.json();
+                    if (doc && (doc.email || doc.data)) {
+                      cloudRecord = doc;
+                      break;
+                    }
                   }
+                }
+                // Check direct inline JSON message
+                if (item && item.message) {
+                  try {
+                    const parsedDoc = JSON.parse(item.message);
+                    if (parsedDoc && (parsedDoc.email || parsedDoc.data)) {
+                      cloudRecord = parsedDoc;
+                      break;
+                    }
+                  } catch (_) {}
                 }
               } catch (_) {}
             }
           }
         }
       } catch (err) {
-        console.warn('Real cloud fetch (offline or timeout):', err);
+        console.warn('Real cloud fetch warning:', err);
       }
 
       // 2. If fetched, cache and update user list
@@ -665,13 +680,25 @@
         const cloudTopic = `ff_${key}`;
         const es = new EventSource(`https://ntfy.sh/${cloudTopic}/sse`);
         
-        es.onmessage = (e) => {
+        es.onmessage = async (e) => {
           try {
             const msgObj = JSON.parse(e.data);
-            if (msgObj && msgObj.message) {
-              const doc = JSON.parse(msgObj.message);
-              if (doc && (doc.email || doc.data)) {
-                onUpdate(doc);
+            if (msgObj) {
+              if (msgObj.attachment && msgObj.attachment.url) {
+                const fileRes = await fetch(msgObj.attachment.url);
+                if (fileRes.ok) {
+                  const doc = await fileRes.json();
+                  if (doc && (doc.email || doc.data)) {
+                    onUpdate(doc);
+                    return;
+                  }
+                }
+              }
+              if (msgObj.message) {
+                const doc = JSON.parse(msgObj.message);
+                if (doc && (doc.email || doc.data)) {
+                  onUpdate(doc);
+                }
               }
             }
           } catch (_) {}
@@ -688,7 +715,7 @@
     const registerCloudAccount = async ({ email, password, name, initialData = null }) => {
       const cleanEmail = normalizeEmail(email);
       if (!cleanEmail || !cleanEmail.includes('@')) {
-        return { ok: false, message: 'Địa chỉ Gmail không hợp lệ!' };
+        return { ok: false, message: 'Địa chỉ Gmail không hợp lệ! Vui lòng kiểm tra lại.' };
       }
       if (!password || password.trim().length < 4) {
         return { ok: false, message: 'Mật khẩu phải có ít nhất 4 ký tự!' };
@@ -696,13 +723,26 @@
 
       const cloudKey = await getUserCloudKey(cleanEmail);
       const passwordHash = await hashPassword(password);
-      const existing = findUserByEmail(cleanEmail);
+      const enteredPlain = password.trim();
+
+      const existingCloud = await loadFromCloudRemote(cloudKey);
+      const existingLocal = findUserByEmail(cleanEmail);
+      const existing = existingCloud || existingLocal;
 
       if (existing && (existing.password || existing.passwordHash)) {
+        const isMatch = 
+          (existing.password && existing.password === enteredPlain) ||
+          (existing.passwordHash && existing.passwordHash === passwordHash) ||
+          (existing.password && (await hashPassword(existing.password)) === passwordHash);
+
+        if (isMatch) {
+          return loginCloudAccount({ email: cleanEmail, password: enteredPlain });
+        }
+
         return {
           ok: false,
           errorType: 'EMAIL_EXISTS',
-          message: `Tài khoản Gmail "${cleanEmail}" đã được tạo trước đó! Bạn có thể chuyển sang tab Đăng Nhập.`
+          message: `Tài khoản Gmail "${cleanEmail}" đã được tạo trước đó trên hệ thống! Vui lòng chuyển sang tab "Đăng Nhập" để vào tài khoản.`
         };
       }
 
@@ -1029,7 +1069,21 @@
     const generatePhoneLoginLink = (user, data = null) => {
       const token = generateQuickSyncToken(user, data);
       if (!token) return '';
-      const baseUrl = typeof window !== 'undefined' ? window.location.href.split('#')[0] : '';
+      let baseUrl = '';
+      if (typeof window !== 'undefined') {
+        const isLocal = 
+          window.location.hostname === 'localhost' || 
+          window.location.hostname === '127.0.0.1' || 
+          window.location.protocol === 'file:';
+          
+        if (isLocal) {
+          baseUrl = 'https://phong09829.github.io/Work-schedule/';
+        } else {
+          baseUrl = window.location.href.split('#')[0];
+        }
+      } else {
+        baseUrl = 'https://phong09829.github.io/Work-schedule/';
+      }
       return `${baseUrl}#sync=${token}`;
     };
 
