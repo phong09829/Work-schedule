@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import { 
   STORAGE_KEYS, 
@@ -11,12 +11,18 @@ import {
   setUserData,
   getCurrentUser,
   setCurrentUser,
-  getRegisteredUsers,
-  registerUserAccount,
-  loginUserAccount,
-  changeUserPassword,
-  normalizeEmail
 } from '../utils/storage';
+import { 
+  registerCloudAccount, 
+  loginCloudAccount, 
+  changeCloudPassword, 
+  pushUserDataToCloud, 
+  pullUserDataFromCloud,
+  generateQuickSyncToken,
+  parseQuickSyncToken,
+  normalizeEmail,
+  CLOUD_STORAGE_KEYS
+} from '../utils/cloudSync';
 import { soundManager } from '../utils/audio';
 import {
   GOOGLE_STORAGE_KEYS,
@@ -76,6 +82,13 @@ export const AppProvider = ({ children }) => {
     return getStoredData(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS);
   });
 
+  // Cloud Sync Status: 'synced' | 'syncing' | 'offline' | 'idle'
+  const [cloudSyncStatus, setCloudSyncStatus] = useState('synced');
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+  const [lastCloudSyncTime, setLastCloudSyncTime] = useState(() => {
+    return getStoredData(CLOUD_STORAGE_KEYS.LAST_CLOUD_SYNC, null);
+  });
+
   // Google OAuth 2.0 & Sync States
   const [googleClientId, setGoogleClientId] = useState(() => {
     return getStoredData(GOOGLE_STORAGE_KEYS.CLIENT_ID, '');
@@ -110,82 +123,246 @@ export const AppProvider = ({ children }) => {
     }, duration);
   }, []);
 
-  // --- Multi-Account Authentication Handlers ---
+  // --- Multi-Device Cloud Sync Synchronization Engine ---
 
-  // Register with Gmail + 1 unique Password
-  const registerAccount = useCallback(({ email, password, name }) => {
-    const res = registerUserAccount({ email, password, name });
-    if (!res.ok) {
-      showToast(res.message, 'error');
-      return res;
+  const cloudSyncTimeoutRef = useRef(null);
+
+  // Push local changes to cloud with debouncing (1.5 seconds after last change)
+  const triggerCloudSync = useCallback((customData = null) => {
+    if (!currentUser || !currentUser.email) return;
+
+    if (cloudSyncTimeoutRef.current) {
+      clearTimeout(cloudSyncTimeoutRef.current);
     }
 
-    const newUser = res.user;
-    setCurrentUserState(newUser);
+    setCloudSyncStatus('syncing');
+    cloudSyncTimeoutRef.current = setTimeout(async () => {
+      try {
+        setIsCloudSyncing(true);
+        const payload = customData || {
+          tasks,
+          events,
+          pomoSessions,
+          settings,
+        };
+        const ok = await pushUserDataToCloud(currentUser, payload);
+        if (ok) {
+          const nowStr = new Date().toISOString();
+          setLastCloudSyncTime(nowStr);
+          setCloudSyncStatus('synced');
+        } else {
+          setCloudSyncStatus('offline');
+        }
+      } catch (err) {
+        console.warn('Background cloud sync error:', err);
+        setCloudSyncStatus('offline');
+      } finally {
+        setIsCloudSyncing(false);
+      }
+    }, 1200);
+  }, [currentUser, tasks, events, pomoSessions, settings]);
 
-    // If this account doesn't have events saved yet, preserve current events/tasks for them
-    const existingEvents = getUserData(newUser.email, 'events', null);
-    if (!existingEvents) {
+  // Pull latest updates from Cloud (when user logs in or returns to tab)
+  const syncWithCloud = useCallback(async (showNotification = false) => {
+    if (!currentUser || !currentUser.email) return;
+
+    try {
+      setIsCloudSyncing(true);
+      setCloudSyncStatus('syncing');
+      const cloudData = await pullUserDataFromCloud(currentUser);
+      
+      if (cloudData) {
+        if (cloudData.tasks && Array.isArray(cloudData.tasks)) {
+          setTasks(cloudData.tasks);
+          setUserData(currentUser.email, 'tasks', cloudData.tasks);
+        }
+        if (cloudData.events && Array.isArray(cloudData.events)) {
+          setEvents(cloudData.events);
+          setUserData(currentUser.email, 'events', cloudData.events);
+        }
+        if (cloudData.pomoSessions && Array.isArray(cloudData.pomoSessions)) {
+          setPomoSessions(cloudData.pomoSessions);
+          setUserData(currentUser.email, 'pomo_sessions', cloudData.pomoSessions);
+        }
+        if (cloudData.settings) {
+          setSettings(cloudData.settings);
+          setUserData(currentUser.email, 'settings', cloudData.settings);
+        }
+
+        const nowStr = new Date().toISOString();
+        setLastCloudSyncTime(nowStr);
+        setCloudSyncStatus('synced');
+
+        if (showNotification) {
+          showToast(`Đã đồng bộ dữ liệu mới nhất từ Đám Mây thành công!`, 'success');
+        }
+      } else {
+        // Fallback push if cloud was empty
+        await pushUserDataToCloud(currentUser, { tasks, events, pomoSessions, settings });
+        setCloudSyncStatus('synced');
+      }
+    } catch (err) {
+      console.warn('Manual cloud sync failed:', err);
+      setCloudSyncStatus('offline');
+      if (showNotification) {
+        showToast('Không thể kết nối Đám Mây. Đang hoạt động ở chế độ Offline.', 'warning');
+      }
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  }, [currentUser, tasks, events, pomoSessions, settings, showToast]);
+
+  // Periodic and Visibility Change sync (Syncs when user unlocks phone or switches back to tab)
+  useEffect(() => {
+    if (!currentUser || !currentUser.email) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncWithCloud(false);
+      }
+    };
+
+    const handleOnline = () => {
+      showToast('Đã kết nối Internet trở lại! Đang đồng bộ Đám Mây...', 'info', 2000);
+      syncWithCloud(false);
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('online', handleOnline);
+
+    // Initial sync on mount
+    syncWithCloud(false);
+
+    // Interval sync every 45s
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        syncWithCloud(false);
+      }
+    }, 45000);
+
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('online', handleOnline);
+      clearInterval(interval);
+    };
+  }, [currentUser?.email]);
+
+  // --- Multi-Account Authentication Handlers (Cloud-Powered) ---
+
+  // Register with Gmail + Password (Accessible from ANY phone or computer)
+  const registerAccount = useCallback(async ({ email, password, name }) => {
+    setIsCloudSyncing(true);
+    try {
+      const res = await registerCloudAccount({
+        email,
+        password,
+        name,
+        initialData: {
+          tasks,
+          events,
+          pomoSessions,
+          settings,
+        }
+      });
+
+      if (!res.ok) {
+        showToast(res.message, 'error');
+        return res;
+      }
+
+      const newUser = res.user;
+      setCurrentUserState(newUser);
+
+      // Save to local user cache
       setUserData(newUser.email, 'events', events);
       setUserData(newUser.email, 'tasks', tasks);
       setUserData(newUser.email, 'pomo_sessions', pomoSessions);
       setUserData(newUser.email, 'settings', settings);
-    } else {
-      setEvents(existingEvents);
-      setTasks(getUserData(newUser.email, 'tasks', DEFAULT_TASKS));
-      setPomoSessions(getUserData(newUser.email, 'pomo_sessions', generateInitialPomoSessions()));
-      setSettings(getUserData(newUser.email, 'settings', DEFAULT_SETTINGS));
-    }
 
-    showToast(`Đăng ký thành công! Đã bảo vệ và lưu lịch trình cho ${newUser.email}`, 'success');
-    return res;
+      setCloudSyncStatus('synced');
+      setLastCloudSyncTime(new Date().toISOString());
+
+      showToast(`Đăng ký thành công! Bạn có thể đăng nhập Gmail "${newUser.email}" trên bất kỳ điện thoại hoặc máy tính nào.`, 'success', 5000);
+      return res;
+    } catch (err) {
+      console.error('Register account error:', err);
+      showToast('Có lỗi xảy ra khi tạo tài khoản Đám Mây. Vui lòng thử lại!', 'error');
+      return { ok: false, message: err.message };
+    } finally {
+      setIsCloudSyncing(false);
+    }
   }, [events, tasks, pomoSessions, settings, showToast]);
 
-  // Login with Gmail + Password
-  const loginAccount = useCallback(({ email, password }) => {
-    const res = loginUserAccount({ email, password });
-    if (!res.ok) {
-      showToast(res.message, 'error');
+  // Login with Gmail + Password (Downloads user cloud data automatically)
+  const loginAccount = useCallback(async ({ email, password }) => {
+    setIsCloudSyncing(true);
+    try {
+      const res = await loginCloudAccount({ email, password });
+      if (!res.ok) {
+        showToast(res.message, 'error');
+        return res;
+      }
+
+      const user = res.user;
+      const data = res.data;
+
+      setCurrentUserState(user);
+
+      // Load all data specific to this account
+      const userEvents = data.events || DEFAULT_CALENDAR_EVENTS;
+      const userTasks = data.tasks || DEFAULT_TASKS;
+      const userPomo = data.pomoSessions || generateInitialPomoSessions();
+      const userSettings = data.settings || DEFAULT_SETTINGS;
+
+      setEvents(userEvents);
+      setTasks(userTasks);
+      setPomoSessions(userPomo);
+      setSettings(userSettings);
+
+      // Cache locally
+      setUserData(user.email, 'events', userEvents);
+      setUserData(user.email, 'tasks', userTasks);
+      setUserData(user.email, 'pomo_sessions', userPomo);
+      setUserData(user.email, 'settings', userSettings);
+
+      setCloudSyncStatus('synced');
+      setLastCloudSyncTime(new Date().toISOString());
+
+      showToast(`Đăng nhập thành công! Đã đồng bộ ${userTasks.length} công việc & ${userEvents.length} lịch trình từ Đám Mây.`, 'success', 4000);
       return res;
+    } catch (err) {
+      console.error('Login account error:', err);
+      showToast('Lỗi kết nối khi đăng nhập. Vui lòng kiểm tra lại mạng!', 'error');
+      return { ok: false, message: err.message };
+    } finally {
+      setIsCloudSyncing(false);
     }
-
-    const user = res.user;
-    setCurrentUserState(user);
-
-    // Load all data specific to this account
-    const userEvents = getUserData(user.email, 'events', DEFAULT_CALENDAR_EVENTS);
-    const userTasks = getUserData(user.email, 'tasks', DEFAULT_TASKS);
-    const userPomo = getUserData(user.email, 'pomo_sessions', generateInitialPomoSessions());
-    const userSettings = getUserData(user.email, 'settings', DEFAULT_SETTINGS);
-
-    setEvents(userEvents);
-    setTasks(userTasks);
-    setPomoSessions(userPomo);
-    setSettings(userSettings);
-
-    showToast(`Đăng nhập thành công! Đã tải ${userEvents.length} lịch trình của ${user.name || user.email}`, 'success');
-    return res;
   }, [showToast]);
 
-  // Change Password for current Gmail
-  const changeAccountPassword = useCallback(({ oldPassword, newPassword }) => {
+  // Change Password for current Gmail in Cloud
+  const changeAccountPassword = useCallback(async ({ oldPassword, newPassword }) => {
     if (!currentUser || !currentUser.email) {
       showToast('Vui lòng đăng nhập tài khoản trước khi đổi mật khẩu!', 'warning');
       return { ok: false, message: 'Chưa đăng nhập' };
     }
 
-    const res = changeUserPassword({
-      email: currentUser.email,
-      oldPassword,
-      newPassword,
-    });
+    try {
+      const res = await changeCloudPassword({
+        email: currentUser.email,
+        oldPassword,
+        newPassword,
+      });
 
-    if (res.ok) {
-      showToast('Đổi mật khẩu thành công! Hãy ghi nhớ mật khẩu mới nhé.', 'success');
-    } else {
-      showToast(res.message, 'error');
+      if (res.ok) {
+        showToast('Đổi mật khẩu thành công! Mật khẩu mới đã có hiệu lực trên mọi thiết bị.', 'success');
+      } else {
+        showToast(res.message, 'error');
+      }
+      return res;
+    } catch (err) {
+      showToast('Không thể cập nhật mật khẩu lên Đám Mây.', 'error');
+      return { ok: false, message: err.message };
     }
-    return res;
   }, [currentUser, showToast]);
 
   // Logout current user
@@ -195,27 +372,47 @@ export const AppProvider = ({ children }) => {
     setGoogleUser(null);
     setGoogleToken(null);
     setLastSyncTime(null);
-    showToast('Đã đăng xuất tài khoản.', 'info');
+    setCloudSyncStatus('idle');
+    showToast('Đã đăng xuất tài khoản. Bạn có thể đăng nhập lại bất cứ lúc nào.', 'info');
   }, [showToast]);
 
-  // Direct Gmail Login legacy fallback (creates account with password or logs in)
-  const loginWithDirectGmail = useCallback((email, customName = null) => {
+  // Quick Device Link: Generate 1-click token for phone or another computer
+  const quickSyncToken = useMemo(() => {
+    if (!currentUser) return '';
+    return generateQuickSyncToken(currentUser, { tasks, events, pomoSessions, settings });
+  }, [currentUser, tasks, events, pomoSessions, settings]);
+
+  // Quick Device Link: Import token from another device
+  const importQuickSync = useCallback(async (tokenStr) => {
+    const parsed = parseQuickSyncToken(tokenStr);
+    if (!parsed || !parsed.email) {
+      showToast('Mã đồng bộ nhanh không hợp lệ hoặc đã hết hạn!', 'error');
+      return false;
+    }
+
+    const sessionUser = {
+      id: `usr-${Date.now()}`,
+      email: parsed.email,
+      name: parsed.name || parsed.email.split('@')[0],
+      passwordHash: parsed.passwordHash,
+    };
+
+    setCurrentUser(sessionUser);
+    setCurrentUserState(sessionUser);
+
+    showToast(`Đã liên kết thiết bị với tài khoản ${parsed.email}! Đang tải dữ liệu...`, 'info');
+    await syncWithCloud(true);
+    return true;
+  }, [syncWithCloud, showToast]);
+
+  // Legacy direct login fallback
+  const loginWithDirectGmail = useCallback(async (email, customName = null) => {
     if (!email || !email.includes('@')) {
       showToast('Vui lòng nhập địa chỉ email hợp lệ!', 'warning');
       return false;
     }
     const cleanEmail = normalizeEmail(email);
-    // Check if user exists
-    const users = getRegisteredUsers();
-    const existing = users.find(u => normalizeEmail(u.email) === cleanEmail);
-
-    if (existing) {
-      showToast(`Tài khoản "${cleanEmail}" đã có mật khẩu. Vui lòng nhập mật khẩu để đăng nhập!`, 'warning');
-      return false;
-    }
-
-    // If new user, register with a default password or invite them
-    const res = registerAccount({
+    const res = await registerAccount({
       email: cleanEmail,
       password: 'password123',
       name: customName,
@@ -241,17 +438,7 @@ export const AppProvider = ({ children }) => {
       const profile = await fetchGoogleUserProfile(accessToken);
       setGoogleUser(profile);
 
-      // Also ensure this Google account is recognized as currentUser
       const cleanEmail = normalizeEmail(profile.email);
-      let existingUser = getRegisteredUsers().find(u => normalizeEmail(u.email) === cleanEmail);
-      if (!existingUser) {
-        registerUserAccount({
-          email: cleanEmail,
-          password: 'google_oauth_login',
-          name: profile.name,
-        });
-      }
-
       const activeSession = {
         id: profile.id,
         name: profile.name,
@@ -262,15 +449,16 @@ export const AppProvider = ({ children }) => {
       setCurrentUser(activeSession);
       setCurrentUserState(activeSession);
 
-      showToast(`Chào mừng ${profile.name}! Đã kết nối Google thành công.`, 'success');
+      showToast(`Chào mừng ${profile.name}! Đã kết nối Google và kích hoạt đồng bộ đám mây.`, 'success');
 
-      // Immediate 2-way sync
+      // Sync Cloud & Google Calendar
+      triggerCloudSync();
       syncWithGoogleCalendar(accessToken);
     } catch (err) {
       console.error('Google login error:', err);
       showToast('Đăng nhập Google thất bại hoặc không thể lấy hồ sơ người dùng.', 'error');
     }
-  }, [showToast]);
+  }, [showToast, triggerCloudSync]);
 
   // Persist Events to Active User Storage and Fallback
   useEffect(() => {
@@ -278,7 +466,8 @@ export const AppProvider = ({ children }) => {
       setUserData(currentUser.email, 'events', events);
     }
     setStoredData(GOOGLE_STORAGE_KEYS.CALENDAR_EVENTS, events);
-  }, [events, currentUser]);
+    triggerCloudSync();
+  }, [events, currentUser?.email]);
 
   // Persist Tasks to Active User Storage and Fallback
   useEffect(() => {
@@ -286,7 +475,8 @@ export const AppProvider = ({ children }) => {
       setUserData(currentUser.email, 'tasks', tasks);
     }
     setStoredData(STORAGE_KEYS.TASKS, tasks);
-  }, [tasks, currentUser]);
+    triggerCloudSync();
+  }, [tasks, currentUser?.email]);
 
   // Persist Pomodoro Sessions to Active User Storage and Fallback
   useEffect(() => {
@@ -294,7 +484,8 @@ export const AppProvider = ({ children }) => {
       setUserData(currentUser.email, 'pomo_sessions', pomoSessions);
     }
     setStoredData(STORAGE_KEYS.POMO_SESSIONS, pomoSessions);
-  }, [pomoSessions, currentUser]);
+    triggerCloudSync();
+  }, [pomoSessions, currentUser?.email]);
 
   // Persist Settings
   useEffect(() => {
@@ -302,7 +493,8 @@ export const AppProvider = ({ children }) => {
       setUserData(currentUser.email, 'settings', settings);
     }
     setStoredData(STORAGE_KEYS.SETTINGS, settings);
-  }, [settings, currentUser]);
+    triggerCloudSync();
+  }, [settings, currentUser?.email]);
 
   // Persist Google Auth Info
   useEffect(() => {
@@ -349,7 +541,6 @@ export const AppProvider = ({ children }) => {
         const localNonGoogle = prevEvents.filter(e => !e.googleEventId);
         const merged = [...gcalEvents, ...localNonGoogle];
         
-        // Save immediately to account storage
         if (currentUser && currentUser.email) {
           setUserData(currentUser.email, 'events', merged);
         }
@@ -373,7 +564,7 @@ export const AppProvider = ({ children }) => {
     }
   }, [googleToken, currentUser, showToast]);
 
-  // Calendar Event Actions (with Guaranteed Instant Persistence & Google Sync)
+  // Calendar Event Actions
   const addEvent = useCallback(async (eventData) => {
     const newEvent = {
       id: `evt-${Date.now()}`,
@@ -393,7 +584,6 @@ export const AppProvider = ({ children }) => {
       userEmail: currentUser?.email || 'guest',
     };
 
-    // Update state and write to storage immediately
     setEvents(prev => {
       const updated = [newEvent, ...prev];
       if (currentUser && currentUser.email) {
@@ -404,7 +594,6 @@ export const AppProvider = ({ children }) => {
 
     showToast(`Đã thêm lịch trình: "${newEvent.title}"`, 'success');
 
-    // Sync to Google Calendar if connected
     if (isGoogleConnected && googleToken?.access_token) {
       try {
         setIsGoogleSyncing(true);
@@ -428,7 +617,6 @@ export const AppProvider = ({ children }) => {
         }
       } catch (err) {
         console.error('Sync add event error:', err);
-        showToast('Lưu tại máy thành công. Chưa thể đẩy lên Google Calendar.', 'warning');
       } finally {
         setIsGoogleSyncing(false);
       }
@@ -454,9 +642,8 @@ export const AppProvider = ({ children }) => {
       return updated;
     });
 
-    showToast('Đã lưu chỉnh sửa lịch trình thành công!', 'info');
+    showToast('Đã lưu chỉnh sửa lịch trình!', 'info');
 
-    // Sync update to Google Calendar if linked
     if (targetEvent && targetEvent.googleEventId && isGoogleConnected && googleToken?.access_token) {
       try {
         setIsGoogleSyncing(true);
@@ -482,7 +669,6 @@ export const AppProvider = ({ children }) => {
 
     showToast(`Đã xóa sự kiện "${eventToDelete?.title || ''}"`, 'warning');
 
-    // Delete on Google Calendar if linked
     if (eventToDelete && eventToDelete.googleEventId && isGoogleConnected && googleToken?.access_token) {
       try {
         setIsGoogleSyncing(true);
@@ -827,13 +1013,20 @@ export const AppProvider = ({ children }) => {
       value={{
         activeTab,
         setActiveTab,
-        // Current User Account & Auth
+        // Current User Account & Cloud Auth
         currentUser,
         isAccountLoggedIn,
         registerAccount,
         loginAccount,
         changeAccountPassword,
         logoutAccount,
+        // Cloud Sync Status & Multi-Device Linking
+        cloudSyncStatus,
+        isCloudSyncing,
+        lastCloudSyncTime,
+        syncWithCloud,
+        quickSyncToken,
+        importQuickSync,
         // Tasks
         tasks,
         addTask,

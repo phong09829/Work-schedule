@@ -14,7 +14,9 @@ import {
   Shield,
   Lock,
   LogIn,
-  User
+  User,
+  Cloud,
+  Smartphone
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useTheme } from '../context/ThemeContext';
@@ -29,6 +31,9 @@ export const Navbar = () => {
     todayFocusMinutes,
     currentUser,
     isAccountLoggedIn,
+    cloudSyncStatus,
+    isCloudSyncing,
+    syncWithCloud,
     isGoogleConnected,
     googleUser,
     isGoogleSyncing,
@@ -59,15 +64,15 @@ export const Navbar = () => {
               onClick={() => setActiveTab('dashboard')}
               className="flex items-center gap-3 cursor-pointer group select-none"
             >
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-brand-600 via-indigo-500 to-purple-500 flex items-center justify-center shadow-lg shadow-brand-500/25 group-hover:scale-105 transition-transform">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-brand-600 via-indigo-500 to-purple-500 flex items-center justify-center shadow-lg shadow-brand-500/25 group-hover:scale-105 transition-transform">
                 <Timer className="w-5 h-5 text-white animate-pulse-slow" />
               </div>
               <div>
-                <span className="text-lg font-extrabold bg-gradient-to-r from-brand-500 to-purple-500 bg-clip-text text-transparent">
+                <span className="text-base sm:text-lg font-extrabold bg-gradient-to-r from-brand-500 to-purple-500 bg-clip-text text-transparent">
                   FocusFlow
                 </span>
                 <span className="hidden sm:inline-block ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-brand-500/10 text-brand-500 border border-brand-500/20">
-                  PRO
+                  CLOUD
                 </span>
               </div>
             </div>
@@ -95,13 +100,13 @@ export const Navbar = () => {
             </nav>
 
             {/* Right Quick Actions */}
-            <div className="flex items-center gap-2 sm:gap-2.5">
+            <div className="flex items-center gap-1.5 sm:gap-2.5">
               
-              {/* Account & Password Status / Login Button */}
+              {/* Account & Cloud Sync Status Button */}
               <button
                 onClick={() => setIsGoogleModalOpen(true)}
-                title={isAccountLoggedIn ? `Tài khoản: ${currentUser?.email} (Đã bảo vệ bằng mật khẩu)` : 'Đăng nhập Gmail có mật khẩu'}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-sm ${
+                title={isAccountLoggedIn ? `Tài khoản Đám Mây: ${currentUser?.email}` : 'Đăng nhập Gmail để đồng bộ mọi thiết bị'}
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-sm ${
                   isAccountLoggedIn
                     ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20'
                     : 'bg-gradient-to-r from-brand-600 to-purple-600 text-white border-transparent hover:from-brand-500 hover:to-purple-500 shadow-brand-500/20'
@@ -112,15 +117,19 @@ export const Navbar = () => {
                     <div className="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] font-bold">
                       {currentUser?.name?.charAt(0) || currentUser?.email?.charAt(0) || 'U'}
                     </div>
-                    <span className="hidden sm:inline max-w-[120px] truncate">
+                    <span className="hidden sm:inline max-w-[110px] truncate">
                       {currentUser?.name?.split(' ')[0] || currentUser?.email?.split('@')[0]}
                     </span>
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    {isCloudSyncing ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-brand-500" />
+                    ) : (
+                      <Cloud className="w-3.5 h-3.5 text-emerald-500" />
+                    )}
                   </>
                 ) : (
                   <>
-                    <Lock className="w-3.5 h-3.5" />
-                    <span>Đăng Nhập Gmail</span>
+                    <Cloud className="w-3.5 h-3.5" />
+                    <span className="text-xs">Đăng Nhập Gmail</span>
                   </>
                 )}
               </button>
@@ -128,7 +137,7 @@ export const Navbar = () => {
               {/* Streak Badge */}
               <div 
                 title={`Chuỗi ${streakDays} ngày tập trung liên tục`}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold select-none cursor-default"
+                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold select-none cursor-default"
               >
                 <Flame className="w-4 h-4 text-amber-500 animate-bounce" />
                 <span>{streakDays}d</span>
@@ -190,7 +199,7 @@ export const Navbar = () => {
         onClose={() => setIsSettingsOpen(false)}
       />
 
-      {/* Google & Account Auth Modal */}
+      {/* Google & Account Cloud Auth Modal */}
       <GoogleConfigModal
         isOpen={isGoogleModalOpen}
         onClose={() => setIsGoogleModalOpen(false)}
