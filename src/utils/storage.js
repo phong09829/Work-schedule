@@ -142,9 +142,107 @@ export const getUserStorageKey = (email, dataType) => {
   return `focusflow_u_${safeEmail}_${dataType}_v2`;
 };
 
-// Retrieve registered user list
+// Retrieve registered user list with deep legacy scanning across all historical versions
 export const getRegisteredUsers = () => {
-  return getStoredData(STORAGE_KEYS.USERS, []);
+  const userMap = new Map();
+
+  // Helper to add/merge a user object
+  const mergeUser = (u) => {
+    if (!u || !u.email) return;
+    const clean = normalizeEmail(u.email);
+    if (!clean || !clean.includes('@')) return;
+
+    const existing = userMap.get(clean);
+    if (!existing) {
+      userMap.set(clean, {
+        id: u.id || `usr-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+        email: clean,
+        name: u.name || clean.split('@')[0],
+        password: u.password || '',
+        passwordHash: u.passwordHash || '',
+        avatar: u.avatar || u.picture || null,
+        createdAt: u.createdAt || new Date().toISOString(),
+        lastLogin: u.lastLogin || new Date().toISOString(),
+      });
+    } else {
+      // Merge best available properties
+      if (!existing.password && u.password) existing.password = u.password;
+      if (!existing.passwordHash && u.passwordHash) existing.passwordHash = u.passwordHash;
+      if (!existing.name && u.name) existing.name = u.name;
+      if (!existing.avatar && (u.avatar || u.picture)) existing.avatar = u.avatar || u.picture;
+    }
+  };
+
+  // 1. Primary registered users list
+  const primaryUsers = getStoredData(STORAGE_KEYS.USERS, []);
+  if (Array.isArray(primaryUsers)) {
+    primaryUsers.forEach(mergeUser);
+  }
+
+  // 2. Scan historical keys in localStorage
+  const legacyKeys = [
+    'focusflow_registered_users_v2',
+    'focusflow_registered_users_v1',
+    'focusflow_users_v1',
+    'focusflow_users',
+    'focusflow_current_user_v2',
+    'focusflow_current_user_v1',
+    'focusflow_current_user',
+    'focusflow_user_profile_v1',
+    'focusflow_google_user_v1',
+    'focusflow_cloud_cached_users_v2',
+    'focusflow_cloud_cached_users_v1'
+  ];
+
+  legacyKeys.forEach(key => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(mergeUser);
+        } else if (parsed && typeof parsed === 'object' && parsed.email) {
+          mergeUser(parsed);
+        }
+      }
+    } catch (_) {}
+  });
+
+  // 3. Scan all localStorage keys for user namespaces (e.g. focusflow_u_xxx_tasks_v2 or cloud_cache_ff_user_xxx)
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      
+      // Match focusflow_u_<email>_*
+      if (k.startsWith('focusflow_u_') && k.includes('@')) {
+        const parts = k.replace('focusflow_u_', '').split('_');
+        const candidateEmail = parts[0];
+        if (candidateEmail && candidateEmail.includes('@')) {
+          mergeUser({ email: candidateEmail });
+        }
+      }
+
+      // Match cloud_cache_ff_user_*
+      if (k.startsWith('cloud_cache_ff_user_')) {
+        try {
+          const item = JSON.parse(localStorage.getItem(k));
+          if (item && item.email) mergeUser(item);
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+
+  const mergedList = Array.from(userMap.values());
+  
+  // Persist merged list
+  if (mergedList.length > 0) {
+    try {
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(mergedList));
+    } catch (_) {}
+  }
+
+  return mergedList;
 };
 
 // Save registered user list
@@ -162,7 +260,11 @@ export const findUserByEmail = (email) => {
 
 // Get current logged-in user
 export const getCurrentUser = () => {
-  return getStoredData(STORAGE_KEYS.CURRENT_USER, null);
+  const user = getStoredData(STORAGE_KEYS.CURRENT_USER, null);
+  if (user && user.email) {
+    user.email = normalizeEmail(user.email);
+  }
+  return user;
 };
 
 // Set current logged-in user
@@ -170,11 +272,15 @@ export const setCurrentUser = (user) => {
   if (!user) {
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
   } else {
-    setStoredData(STORAGE_KEYS.CURRENT_USER, user);
+    const cleanUser = {
+      ...user,
+      email: normalizeEmail(user.email),
+    };
+    setStoredData(STORAGE_KEYS.CURRENT_USER, cleanUser);
   }
 };
 
-// Register a new user account with 1 unique password per Gmail
+// Register a new user account with unique password per Gmail
 export const registerUserAccount = ({ email, password, name }) => {
   const cleanEmail = normalizeEmail(email);
   if (!cleanEmail || !cleanEmail.includes('@')) {
@@ -185,29 +291,29 @@ export const registerUserAccount = ({ email, password, name }) => {
   }
 
   const existing = findUserByEmail(cleanEmail);
-  if (existing) {
+  if (existing && (existing.password || existing.passwordHash)) {
     return { 
       ok: false, 
       errorType: 'EMAIL_EXISTS',
-      message: `Tài khoản Gmail "${cleanEmail}" đã được đăng ký! Vui lòng chuyển sang tab Đăng Nhập.` 
+      message: `Tài khoản Gmail "${cleanEmail}" đã được tạo trước đó! Bạn có thể đăng nhập hoặc đặt lại mật khẩu.` 
     };
   }
 
   const displayName = name && name.trim()
     ? name.trim()
-    : cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    : (existing?.name || cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()));
 
   const newUser = {
-    id: `usr-${Date.now()}`,
+    id: existing?.id || `usr-${Date.now()}`,
     email: cleanEmail,
     name: displayName,
-    password: password.trim(), // password for this Gmail account
-    avatar: null,
-    createdAt: new Date().toISOString(),
+    password: password.trim(),
+    avatar: existing?.avatar || null,
+    createdAt: existing?.createdAt || new Date().toISOString(),
     lastLogin: new Date().toISOString(),
   };
 
-  const users = getRegisteredUsers();
+  const users = getRegisteredUsers().filter(u => normalizeEmail(u.email) !== cleanEmail);
   users.push(newUser);
   saveRegisteredUsers(users);
 
@@ -240,11 +346,16 @@ export const loginUserAccount = ({ email, password }) => {
     };
   }
 
-  if (user.password !== password?.trim()) {
+  // If user previously had no password (e.g. from Google direct login), allow setting this password now
+  if (!user.password && !user.passwordHash) {
+    user.password = password.trim();
+    const users = getRegisteredUsers().map(u => normalizeEmail(u.email) === cleanEmail ? { ...u, password: password.trim() } : u);
+    saveRegisteredUsers(users);
+  } else if (user.password && user.password !== password?.trim()) {
     return { 
       ok: false, 
       errorType: 'WRONG_PASSWORD',
-      message: 'Mật khẩu không chính xác! Vui lòng thử lại.' 
+      message: 'Mật khẩu không chính xác! Bạn có thể chọn "Đặt lại mật khẩu" nếu quên mật khẩu.' 
     };
   }
 
@@ -270,6 +381,51 @@ export const loginUserAccount = ({ email, password }) => {
   return { ok: true, user: sessionUser };
 };
 
+// Reset password for a Gmail account
+export const resetUserPassword = ({ email, newPassword }) => {
+  const cleanEmail = normalizeEmail(email);
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return { ok: false, message: 'Địa chỉ Gmail không hợp lệ!' };
+  }
+  if (!newPassword || newPassword.trim().length < 4) {
+    return { ok: false, message: 'Mật khẩu mới phải có ít nhất 4 ký tự!' };
+  }
+
+  const users = getRegisteredUsers();
+  let user = users.find(u => normalizeEmail(u.email) === cleanEmail);
+
+  if (!user) {
+    // Create user if not found
+    user = {
+      id: `usr-${Date.now()}`,
+      email: cleanEmail,
+      name: cleanEmail.split('@')[0],
+      password: newPassword.trim(),
+      avatar: null,
+      createdAt: new Date().toISOString(),
+      lastLogin: new Date().toISOString(),
+    };
+    users.push(user);
+  } else {
+    user.password = newPassword.trim();
+    user.lastLogin = new Date().toISOString();
+  }
+
+  const updatedUsers = users.map(u => normalizeEmail(u.email) === cleanEmail ? { ...u, password: newPassword.trim() } : u);
+  saveRegisteredUsers(updatedUsers);
+
+  const sessionUser = {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    avatar: user.avatar,
+    createdAt: user.createdAt,
+  };
+  setCurrentUser(sessionUser);
+
+  return { ok: true, user: sessionUser, message: 'Đã đặt lại mật khẩu thành công!' };
+};
+
 // Change account password for a Gmail
 export const changeUserPassword = ({ email, oldPassword, newPassword }) => {
   const cleanEmail = normalizeEmail(email);
@@ -278,7 +434,7 @@ export const changeUserPassword = ({ email, oldPassword, newPassword }) => {
     return { ok: false, message: 'Không tìm thấy thông tin tài khoản!' };
   }
 
-  if (user.password !== oldPassword?.trim()) {
+  if (user.password && user.password !== oldPassword?.trim()) {
     return { ok: false, message: 'Mật khẩu hiện tại không chính xác!' };
   }
 
@@ -286,16 +442,7 @@ export const changeUserPassword = ({ email, oldPassword, newPassword }) => {
     return { ok: false, message: 'Mật khẩu mới phải có ít nhất 4 ký tự!' };
   }
 
-  const users = getRegisteredUsers();
-  const updatedUsers = users.map(u => {
-    if (normalizeEmail(u.email) === cleanEmail) {
-      return { ...u, password: newPassword.trim() };
-    }
-    return u;
-  });
-  saveRegisteredUsers(updatedUsers);
-
-  return { ok: true, message: 'Đổi mật khẩu thành công!' };
+  return resetUserPassword({ email: cleanEmail, newPassword });
 };
 
 // User-specific data helper functions

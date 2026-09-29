@@ -15,11 +15,14 @@ import {
 import { 
   registerCloudAccount, 
   loginCloudAccount, 
-  changeCloudPassword, 
+  changeCloudPassword,
+  resetCloudAccountPassword,
   pushUserDataToCloud, 
   pullUserDataFromCloud,
   generateQuickSyncToken,
+  generatePhoneLoginLink,
   parseQuickSyncToken,
+  exportFullBackup,
   normalizeEmail,
   CLOUD_STORAGE_KEYS
 } from '../utils/cloudSync';
@@ -127,7 +130,7 @@ export const AppProvider = ({ children }) => {
 
   const cloudSyncTimeoutRef = useRef(null);
 
-  // Push local changes to cloud with debouncing (1.5 seconds after last change)
+  // Push local changes to cloud with debouncing (1.2 seconds after last change)
   const triggerCloudSync = useCallback((customData = null) => {
     if (!currentUser || !currentUser.email) return;
 
@@ -194,12 +197,8 @@ export const AppProvider = ({ children }) => {
         setCloudSyncStatus('synced');
 
         if (showNotification) {
-          showToast(`Đã đồng bộ dữ liệu mới nhất từ Đám Mây thành công!`, 'success');
+          showToast(`Đã đồng bộ dữ liệu mới nhất thành công!`, 'success');
         }
-      } else {
-        // Fallback push if cloud was empty
-        await pushUserDataToCloud(currentUser, { tasks, events, pomoSessions, settings });
-        setCloudSyncStatus('synced');
       }
     } catch (err) {
       console.warn('Manual cloud sync failed:', err);
@@ -210,7 +209,35 @@ export const AppProvider = ({ children }) => {
     } finally {
       setIsCloudSyncing(false);
     }
-  }, [currentUser, tasks, events, pomoSessions, settings, showToast]);
+  }, [currentUser, showToast]);
+
+  // Handle URL Hash Auto-Login (e.g. when opening 1-click pairing link on mobile)
+  useEffect(() => {
+    try {
+      const hash = window.location.hash;
+      if (hash && (hash.startsWith('#auth=') || hash.startsWith('#login=') || hash.startsWith('#sync='))) {
+        const token = hash.replace(/^#(auth|login|sync)=/, '');
+        const parsed = parseQuickSyncToken(token);
+        if (parsed && parsed.email) {
+          const sessionUser = {
+            id: `usr-${Date.now()}`,
+            email: parsed.email,
+            name: parsed.name || parsed.email.split('@')[0],
+            passwordHash: parsed.passwordHash,
+          };
+          setCurrentUser(sessionUser);
+          setCurrentUserState(sessionUser);
+          
+          // Clear hash from URL cleanly
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+          showToast(`Chào mừng bạn! Đã tự động đăng nhập tài khoản "${parsed.email}" trên thiết bị này.`, 'success', 5000);
+          syncWithCloud(true);
+        }
+      }
+    } catch (e) {
+      console.warn('Auto hash login check warning:', e);
+    }
+  }, [syncWithCloud, showToast]);
 
   // Periodic and Visibility Change sync (Syncs when user unlocks phone or switches back to tab)
   useEffect(() => {
@@ -230,9 +257,6 @@ export const AppProvider = ({ children }) => {
     window.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('online', handleOnline);
 
-    // Initial sync on mount
-    syncWithCloud(false);
-
     // Interval sync every 45s
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') {
@@ -245,9 +269,9 @@ export const AppProvider = ({ children }) => {
       window.removeEventListener('online', handleOnline);
       clearInterval(interval);
     };
-  }, [currentUser?.email]);
+  }, [currentUser?.email, syncWithCloud, showToast]);
 
-  // --- Multi-Account Authentication Handlers (Cloud-Powered) ---
+  // --- Multi-Account Authentication Handlers ---
 
   // Register with Gmail + Password (Accessible from ANY phone or computer)
   const registerAccount = useCallback(async ({ email, password, name }) => {
@@ -286,7 +310,7 @@ export const AppProvider = ({ children }) => {
       return res;
     } catch (err) {
       console.error('Register account error:', err);
-      showToast('Có lỗi xảy ra khi tạo tài khoản Đám Mây. Vui lòng thử lại!', 'error');
+      showToast('Có lỗi xảy ra khi tạo tài khoản. Vui lòng thử lại!', 'error');
       return { ok: false, message: err.message };
     } finally {
       setIsCloudSyncing(false);
@@ -328,11 +352,50 @@ export const AppProvider = ({ children }) => {
       setCloudSyncStatus('synced');
       setLastCloudSyncTime(new Date().toISOString());
 
-      showToast(`Đăng nhập thành công! Đã đồng bộ ${userTasks.length} công việc & ${userEvents.length} lịch trình từ Đám Mây.`, 'success', 4000);
+      showToast(`Đăng nhập thành công! Đã đồng bộ ${userTasks.length} công việc & ${userEvents.length} lịch trình.`, 'success', 4000);
       return res;
     } catch (err) {
       console.error('Login account error:', err);
-      showToast('Lỗi kết nối khi đăng nhập. Vui lòng kiểm tra lại mạng!', 'error');
+      showToast('Lỗi kết nối khi đăng nhập. Vui lòng thử lại!', 'error');
+      return { ok: false, message: err.message };
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  }, [showToast]);
+
+  // Reset Password for any Gmail
+  const resetAccountPassword = useCallback(async ({ email, newPassword }) => {
+    setIsCloudSyncing(true);
+    try {
+      const res = await resetCloudAccountPassword({ email, newPassword });
+      if (!res.ok) {
+        showToast(res.message, 'error');
+        return res;
+      }
+
+      const user = res.user;
+      const data = res.data;
+
+      setCurrentUserState(user);
+
+      const userEvents = data.events || DEFAULT_CALENDAR_EVENTS;
+      const userTasks = data.tasks || DEFAULT_TASKS;
+      const userPomo = data.pomoSessions || generateInitialPomoSessions();
+      const userSettings = data.settings || DEFAULT_SETTINGS;
+
+      setEvents(userEvents);
+      setTasks(userTasks);
+      setPomoSessions(userPomo);
+      setSettings(userSettings);
+
+      setCloudSyncStatus('synced');
+      setLastCloudSyncTime(new Date().toISOString());
+
+      showToast(res.message, 'success', 4000);
+      return res;
+    } catch (err) {
+      console.error('Reset password error:', err);
+      showToast('Không thể đặt lại mật khẩu. Vui lòng thử lại!', 'error');
       return { ok: false, message: err.message };
     } finally {
       setIsCloudSyncing(false);
@@ -360,7 +423,7 @@ export const AppProvider = ({ children }) => {
       }
       return res;
     } catch (err) {
-      showToast('Không thể cập nhật mật khẩu lên Đám Mây.', 'error');
+      showToast('Không thể cập nhật mật khẩu.', 'error');
       return { ok: false, message: err.message };
     }
   }, [currentUser, showToast]);
@@ -381,6 +444,12 @@ export const AppProvider = ({ children }) => {
     if (!currentUser) return '';
     return generateQuickSyncToken(currentUser, { tasks, events, pomoSessions, settings });
   }, [currentUser, tasks, events, pomoSessions, settings]);
+
+  // 1-Click Phone Link
+  const phoneLoginLink = useMemo(() => {
+    if (!currentUser) return '';
+    return generatePhoneLoginLink(currentUser);
+  }, [currentUser]);
 
   // Quick Device Link: Import token from another device
   const importQuickSync = useCallback(async (tokenStr) => {
@@ -1018,6 +1087,7 @@ export const AppProvider = ({ children }) => {
         isAccountLoggedIn,
         registerAccount,
         loginAccount,
+        resetAccountPassword,
         changeAccountPassword,
         logoutAccount,
         // Cloud Sync Status & Multi-Device Linking
@@ -1026,7 +1096,9 @@ export const AppProvider = ({ children }) => {
         lastCloudSyncTime,
         syncWithCloud,
         quickSyncToken,
+        phoneLoginLink,
         importQuickSync,
+        getAllLocalAccounts: getRegisteredUsers,
         // Tasks
         tasks,
         addTask,

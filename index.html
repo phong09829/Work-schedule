@@ -431,37 +431,152 @@
       return `ff_user_${hash.slice(0, 24)}`;
     };
 
+    const getUserStorageKey = (email, dataType) => {
+      const cleanEmail = normalizeEmail(email) || 'guest';
+      const safeEmail = cleanEmail.replace(/[^a-z0-9@._-]/g, '_');
+      return `focusflow_u_${safeEmail}_${dataType}_v2`;
+    };
+
+    // Deep scanning of all legacy and current accounts on this device
+    const getRegisteredUsers = () => {
+      const userMap = new Map();
+      const mergeUser = (u) => {
+        if (!u || !u.email) return;
+        const clean = normalizeEmail(u.email);
+        if (!clean || !clean.includes('@')) return;
+        const existing = userMap.get(clean);
+        if (!existing) {
+          userMap.set(clean, {
+            id: u.id || `usr-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+            email: clean,
+            name: u.name || clean.split('@')[0],
+            password: u.password || '',
+            passwordHash: u.passwordHash || '',
+            avatar: u.avatar || u.picture || null,
+            createdAt: u.createdAt || new Date().toISOString(),
+            lastLogin: u.lastLogin || new Date().toISOString(),
+          });
+        } else {
+          if (!existing.password && u.password) existing.password = u.password;
+          if (!existing.passwordHash && u.passwordHash) existing.passwordHash = u.passwordHash;
+          if (!existing.name && u.name) existing.name = u.name;
+        }
+      };
+
+      const primaryUsers = getStored(STORAGE_KEYS.USERS, []);
+      if (Array.isArray(primaryUsers)) primaryUsers.forEach(mergeUser);
+
+      const legacyKeys = [
+        'focusflow_registered_users_v2',
+        'focusflow_registered_users_v1',
+        'focusflow_users_v1',
+        'focusflow_users',
+        'focusflow_current_user_v2',
+        'focusflow_current_user_v1',
+        'focusflow_current_user',
+        'focusflow_user_profile_v1',
+        'focusflow_google_user_v1',
+        'focusflow_cloud_cached_users_v2'
+      ];
+
+      legacyKeys.forEach(k => {
+        try {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const p = JSON.parse(raw);
+            if (Array.isArray(p)) p.forEach(mergeUser);
+            else if (p && p.email) mergeUser(p);
+          }
+        } catch (_) {}
+      });
+
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (!k) continue;
+          if (k.startsWith('focusflow_u_') && k.includes('@')) {
+            const candidateEmail = k.replace('focusflow_u_', '').split('_')[0];
+            if (candidateEmail && candidateEmail.includes('@')) mergeUser({ email: candidateEmail });
+          }
+          if (k.startsWith('cloud_cache_ff_user_')) {
+            try {
+              const item = JSON.parse(localStorage.getItem(k));
+              if (item && item.email) mergeUser(item);
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+
+      const list = Array.from(userMap.values());
+      if (list.length > 0) {
+        try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(list)); } catch (_) {}
+      }
+      return list;
+    };
+
+    const saveRegisteredUsers = (users) => {
+      setStored(STORAGE_KEYS.USERS, users);
+    };
+
+    const findUserByEmail = (email) => {
+      const clean = normalizeEmail(email);
+      if (!clean) return null;
+      return getRegisteredUsers().find(u => normalizeEmail(u.email) === clean) || null;
+    };
+
+    const getCurrentUser = () => {
+      const user = getStored(STORAGE_KEYS.CURRENT_USER, null);
+      if (user && user.email) user.email = normalizeEmail(user.email);
+      return user;
+    };
+
+    const setCurrentUser = (user) => {
+      if (!user) {
+        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      } else {
+        const clean = { ...user, email: normalizeEmail(user.email) };
+        setStored(STORAGE_KEYS.CURRENT_USER, clean);
+      }
+    };
+
+    const getUserData = (email, dataType, fallback) => {
+      const key = getUserStorageKey(email, dataType);
+      return getStored(key, fallback);
+    };
+
+    const setUserData = (email, dataType, value) => {
+      const key = getUserStorageKey(email, dataType);
+      setStored(key, value);
+    };
+
     const saveToCloudRemote = async (key, data) => {
       const payload = JSON.stringify(data);
-      let saved = false;
-      try {
-        const res = await fetch(`https://kvdb.io/AWyG5Z3P5qg4rXp8QW3b79/${key}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: payload,
-        });
-        if (res.ok) saved = true;
-      } catch (err) {}
       try {
         localStorage.setItem(`cloud_cache_${key}`, payload);
       } catch (e) {}
-      return saved;
+
+      if (data && data.email) {
+        const cleanEmail = normalizeEmail(data.email);
+        const users = getRegisteredUsers();
+        const existingIdx = users.findIndex(u => normalizeEmail(u.email) === cleanEmail);
+        const summary = {
+          id: data.id || `usr-${Date.now()}`,
+          email: cleanEmail,
+          name: data.name || cleanEmail.split('@')[0],
+          password: data.password || '',
+          passwordHash: data.passwordHash || '',
+          avatar: data.avatar || null,
+          createdAt: data.createdAt || new Date().toISOString(),
+          lastLogin: new Date().toISOString(),
+        };
+        if (existingIdx >= 0) users[existingIdx] = { ...users[existingIdx], ...summary };
+        else users.push(summary);
+        saveRegisteredUsers(users);
+      }
+      return true;
     };
 
     const loadFromCloudRemote = async (key) => {
-      try {
-        const res = await fetch(`https://kvdb.io/AWyG5Z3P5qg4rXp8QW3b79/${key}`, {
-          method: 'GET',
-          headers: { 'Cache-Control': 'no-cache' }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data) {
-            try { localStorage.setItem(`cloud_cache_${key}`, JSON.stringify(data)); } catch (_) {}
-            return data;
-          }
-        }
-      } catch (err) {}
       try {
         const cached = localStorage.getItem(`cloud_cache_${key}`);
         if (cached) return JSON.parse(cached);
@@ -480,21 +595,19 @@
 
       const cloudKey = await getUserCloudKey(cleanEmail);
       const passwordHash = await hashPassword(password);
+      const existing = findUserByEmail(cleanEmail);
 
-      try {
-        const existing = await loadFromCloudRemote(cloudKey);
-        if (existing && existing.email && normalizeEmail(existing.email) === cleanEmail) {
-          return {
-            ok: false,
-            errorType: 'EMAIL_EXISTS',
-            message: `Tài khoản Gmail "${cleanEmail}" đã tồn tại trên Đám Mây! Vui lòng chọn tab Đăng Nhập.`
-          };
-        }
-      } catch (e) {}
+      if (existing && (existing.password || existing.passwordHash)) {
+        return {
+          ok: false,
+          errorType: 'EMAIL_EXISTS',
+          message: `Tài khoản Gmail "${cleanEmail}" đã được tạo trước đó! Bạn có thể chuyển sang tab Đăng Nhập.`
+        };
+      }
 
       const displayName = name && name.trim()
         ? name.trim()
-        : cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        : (existing?.name || cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()));
 
       const defaultDataset = initialData || {
         tasks: DEFAULT_TASKS,
@@ -504,12 +617,13 @@
       };
 
       const newUserRecord = {
-        id: `usr-${Date.now()}`,
+        id: existing?.id || `usr-${Date.now()}`,
         email: cleanEmail,
         name: displayName,
+        password: password.trim(),
         passwordHash: passwordHash,
-        avatar: null,
-        createdAt: new Date().toISOString(),
+        avatar: existing?.avatar || null,
+        createdAt: existing?.createdAt || new Date().toISOString(),
         lastLogin: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         data: defaultDataset,
@@ -526,14 +640,19 @@
         passwordHash: passwordHash,
       };
 
-      setStored(STORAGE_KEYS.CURRENT_USER, sessionUser);
+      setCurrentUser(sessionUser);
       setStored('focusflow_last_cloud_sync_time_v1', new Date().toISOString());
+
+      setUserData(cleanEmail, 'tasks', defaultDataset.tasks);
+      setUserData(cleanEmail, 'events', defaultDataset.events);
+      setUserData(cleanEmail, 'pomo_sessions', defaultDataset.pomoSessions);
+      setUserData(cleanEmail, 'settings', defaultDataset.settings);
 
       return { 
         ok: true, 
         user: sessionUser, 
         data: newUserRecord.data,
-        message: `Đăng ký thành công! Bạn có thể đăng nhập trên mọi thiết bị.` 
+        message: `Đăng ký thành công! Tài khoản "${cleanEmail}" đã sẵn sàng.` 
       };
     };
 
@@ -544,29 +663,49 @@
 
       const cloudKey = await getUserCloudKey(cleanEmail);
       const enteredHash = await hashPassword(password);
+      const enteredPlain = password.trim();
 
-      let userRecord = null;
-      try {
-        userRecord = await loadFromCloudRemote(cloudKey);
-      } catch (err) {}
+      let userRecord = await loadFromCloudRemote(cloudKey);
+      const localUser = findUserByEmail(cleanEmail);
+
+      if (localUser) {
+        if (!userRecord) {
+          userRecord = {
+            id: localUser.id || `usr-${Date.now()}`,
+            email: cleanEmail,
+            name: localUser.name || cleanEmail.split('@')[0],
+            password: localUser.password || '',
+            passwordHash: localUser.passwordHash || '',
+            avatar: localUser.avatar || null,
+            createdAt: localUser.createdAt || new Date().toISOString(),
+            data: {
+              tasks: getUserData(cleanEmail, 'tasks', getStored(STORAGE_KEYS.TASKS, DEFAULT_TASKS)),
+              events: getUserData(cleanEmail, 'events', DEFAULT_EVENTS),
+              pomoSessions: getUserData(cleanEmail, 'pomo_sessions', generateInitialPomoSessions()),
+              settings: getUserData(cleanEmail, 'settings', DEFAULT_SETTINGS),
+            }
+          };
+        } else {
+          if (!userRecord.password && localUser.password) userRecord.password = localUser.password;
+          if (!userRecord.passwordHash && localUser.passwordHash) userRecord.passwordHash = localUser.passwordHash;
+        }
+      }
 
       if (!userRecord) {
-        const cachedUsers = getStored(STORAGE_KEYS.USERS, []);
-        const localUser = cachedUsers.find(u => normalizeEmail(u.email) === cleanEmail);
-        if (localUser) {
-          const localHash = localUser.passwordHash || (await hashPassword(localUser.password || ''));
-          if (localHash === enteredHash || localUser.password === password.trim()) {
-            userRecord = {
-              ...localUser,
-              passwordHash: localHash,
-              data: {
-                tasks: getStored(`focusflow_u_${cleanEmail}_tasks_v2`, DEFAULT_TASKS),
-                events: getStored(`focusflow_u_${cleanEmail}_events_v2`, DEFAULT_EVENTS),
-                pomoSessions: getStored(`focusflow_u_${cleanEmail}_pomo_v2`, generateInitialPomoSessions()),
-                settings: getStored(`focusflow_u_${cleanEmail}_settings_v2`, DEFAULT_SETTINGS),
-              }
-            };
-          }
+        const orphanTasks = getUserData(cleanEmail, 'tasks', null);
+        const orphanEvents = getUserData(cleanEmail, 'events', null);
+        if (orphanTasks || orphanEvents) {
+          return registerCloudAccount({
+            email: cleanEmail,
+            password: enteredPlain,
+            name: cleanEmail.split('@')[0],
+            initialData: {
+              tasks: orphanTasks || DEFAULT_TASKS,
+              events: orphanEvents || DEFAULT_EVENTS,
+              pomoSessions: getUserData(cleanEmail, 'pomo_sessions', generateInitialPomoSessions()),
+              settings: getUserData(cleanEmail, 'settings', DEFAULT_SETTINGS),
+            }
+          });
         }
       }
 
@@ -574,23 +713,33 @@
         return {
           ok: false,
           errorType: 'USER_NOT_FOUND',
-          message: `Tài khoản Gmail "${cleanEmail}" chưa tồn tại trên hệ thống. Vui lòng chọn tab "Đăng Ký Tài Khoản" để tạo mới!`
+          message: `Tài khoản Gmail "${cleanEmail}" chưa được tìm thấy trên thiết bị này. Bạn có thể bấm "Đăng Ký Mới" hoặc "Đặt lại mật khẩu".`
         };
       }
 
-      const isMatch = userRecord.passwordHash === enteredHash || 
-                      (userRecord.password && userRecord.password === password.trim());
+      if (!userRecord.password && !userRecord.passwordHash) {
+        userRecord.password = enteredPlain;
+        userRecord.passwordHash = enteredHash;
+        await saveToCloudRemote(cloudKey, userRecord);
+      } else {
+        const isMatch = (userRecord.password && userRecord.password === enteredPlain) ||
+                        (userRecord.passwordHash && userRecord.passwordHash === enteredHash) ||
+                        (userRecord.password && (await hashPassword(userRecord.password)) === enteredHash);
 
-      if (!isMatch) {
-        return {
-          ok: false,
-          errorType: 'WRONG_PASSWORD',
-          message: 'Mật khẩu không chính xác! Vui lòng kiểm tra lại.'
-        };
+        if (!isMatch) {
+          return {
+            ok: false,
+            errorType: 'WRONG_PASSWORD',
+            canReset: true,
+            message: 'Mật khẩu không chính xác! Bạn có thể chọn "Đặt lại mật khẩu" bên dưới để tạo lại mật khẩu mới.'
+          };
+        }
       }
 
       userRecord.lastLogin = new Date().toISOString();
-      saveToCloudRemote(cloudKey, userRecord).catch(() => {});
+      userRecord.password = enteredPlain;
+      userRecord.passwordHash = enteredHash;
+      await saveToCloudRemote(cloudKey, userRecord);
 
       const sessionUser = {
         id: userRecord.id,
@@ -601,18 +750,82 @@
         passwordHash: enteredHash,
       };
 
-      setStored(STORAGE_KEYS.CURRENT_USER, sessionUser);
+      setCurrentUser(sessionUser);
+      setStored('focusflow_last_cloud_sync_time_v1', new Date().toISOString());
+
+      const dataset = userRecord.data || {
+        tasks: getUserData(cleanEmail, 'tasks', DEFAULT_TASKS),
+        events: getUserData(cleanEmail, 'events', DEFAULT_EVENTS),
+        pomoSessions: getUserData(cleanEmail, 'pomo_sessions', generateInitialPomoSessions()),
+        settings: getUserData(cleanEmail, 'settings', DEFAULT_SETTINGS),
+      };
+
+      return {
+        ok: true,
+        user: sessionUser,
+        data: dataset,
+        message: `Đăng nhập thành công! Đã tải dữ liệu của "${cleanEmail}".`
+      };
+    };
+
+    const resetCloudAccountPassword = async ({ email, newPassword }) => {
+      const cleanEmail = normalizeEmail(email);
+      if (!cleanEmail || !cleanEmail.includes('@')) {
+        return { ok: false, message: 'Địa chỉ Gmail không hợp lệ!' };
+      }
+      if (!newPassword || newPassword.trim().length < 4) {
+        return { ok: false, message: 'Mật khẩu mới phải có ít nhất 4 ký tự!' };
+      }
+
+      const cloudKey = await getUserCloudKey(cleanEmail);
+      const newHash = await hashPassword(newPassword);
+      let userRecord = await loadFromCloudRemote(cloudKey);
+      const localUser = findUserByEmail(cleanEmail);
+
+      if (!userRecord && !localUser) {
+        return registerCloudAccount({
+          email: cleanEmail,
+          password: newPassword,
+          name: cleanEmail.split('@')[0],
+        });
+      }
+
+      const updatedRecord = {
+        ...(userRecord || localUser || {}),
+        id: userRecord?.id || localUser?.id || `usr-${Date.now()}`,
+        email: cleanEmail,
+        name: userRecord?.name || localUser?.name || cleanEmail.split('@')[0],
+        password: newPassword.trim(),
+        passwordHash: newHash,
+        updatedAt: new Date().toISOString(),
+        lastLogin: new Date().toISOString(),
+        data: userRecord?.data || {
+          tasks: getUserData(cleanEmail, 'tasks', DEFAULT_TASKS),
+          events: getUserData(cleanEmail, 'events', DEFAULT_EVENTS),
+          pomoSessions: getUserData(cleanEmail, 'pomo_sessions', generateInitialPomoSessions()),
+          settings: getUserData(cleanEmail, 'settings', DEFAULT_SETTINGS),
+        }
+      };
+
+      await saveToCloudRemote(cloudKey, updatedRecord);
+
+      const sessionUser = {
+        id: updatedRecord.id,
+        email: updatedRecord.email,
+        name: updatedRecord.name,
+        avatar: updatedRecord.avatar || null,
+        createdAt: updatedRecord.createdAt,
+        passwordHash: newHash,
+      };
+
+      setCurrentUser(sessionUser);
       setStored('focusflow_last_cloud_sync_time_v1', new Date().toISOString());
 
       return {
         ok: true,
         user: sessionUser,
-        data: userRecord.data || {
-          tasks: DEFAULT_TASKS,
-          events: DEFAULT_EVENTS,
-          pomoSessions: generateInitialPomoSessions(),
-          settings: DEFAULT_SETTINGS,
-        },
+        data: updatedRecord.data,
+        message: `Đã đặt lại mật khẩu cho tài khoản "${cleanEmail}" thành công!`
       };
     };
 
@@ -620,31 +833,14 @@
       const cleanEmail = normalizeEmail(email);
       if (!cleanEmail) return { ok: false, message: 'Chưa xác định tài khoản!' };
 
-      const cloudKey = await getUserCloudKey(cleanEmail);
-      const oldHash = await hashPassword(oldPassword);
-      const newHash = await hashPassword(newPassword);
+      const userRecord = await loadFromCloudRemote(await getUserCloudKey(cleanEmail));
+      const localUser = findUserByEmail(cleanEmail);
+      const currentPassword = userRecord?.password || localUser?.password;
 
-      let userRecord = await loadFromCloudRemote(cloudKey);
-      if (!userRecord) return { ok: false, message: 'Không tìm thấy tài khoản trên Đám Mây!' };
-
-      const isOldMatch = userRecord.passwordHash === oldHash || userRecord.password === oldPassword?.trim();
-      if (!isOldMatch) return { ok: false, message: 'Mật khẩu hiện tại không chính xác!' };
-
-      if (!newPassword || newPassword.trim().length < 4) return { ok: false, message: 'Mật khẩu mới phải có ít nhất 4 ký tự!' };
-
-      userRecord.passwordHash = newHash;
-      delete userRecord.password;
-      userRecord.updatedAt = new Date().toISOString();
-
-      await saveToCloudRemote(cloudKey, userRecord);
-
-      const cur = getStored(STORAGE_KEYS.CURRENT_USER, {});
-      if (cur && cur.email === cleanEmail) {
-        cur.passwordHash = newHash;
-        setStored(STORAGE_KEYS.CURRENT_USER, cur);
+      if (currentPassword && currentPassword !== oldPassword?.trim()) {
+        return { ok: false, message: 'Mật khẩu hiện tại không chính xác!' };
       }
-
-      return { ok: true, message: 'Đổi mật khẩu thành công!' };
+      return resetCloudAccountPassword({ email: cleanEmail, newPassword });
     };
 
     const pushUserDataToCloud = async (user, dataPayload) => {
@@ -659,6 +855,7 @@
             id: user.id || `usr-${Date.now()}`,
             email: cleanEmail,
             name: user.name || cleanEmail.split('@')[0],
+            password: user.password || '',
             passwordHash: user.passwordHash || '',
             createdAt: user.createdAt || new Date().toISOString(),
           };
@@ -673,6 +870,11 @@
         };
 
         await saveToCloudRemote(cloudKey, userRecord);
+        setUserData(cleanEmail, 'tasks', userRecord.data.tasks);
+        setUserData(cleanEmail, 'events', userRecord.data.events);
+        setUserData(cleanEmail, 'pomo_sessions', userRecord.data.pomoSessions);
+        setUserData(cleanEmail, 'settings', userRecord.data.settings);
+
         setStored('focusflow_last_cloud_sync_time_v1', new Date().toISOString());
         return true;
       } catch (err) {
@@ -692,12 +894,24 @@
           return userRecord.data;
         }
       } catch (err) {}
-      return null;
+
+      return {
+        tasks: getUserData(cleanEmail, 'tasks', DEFAULT_TASKS),
+        events: getUserData(cleanEmail, 'events', DEFAULT_EVENTS),
+        pomoSessions: getUserData(cleanEmail, 'pomo_sessions', generateInitialPomoSessions()),
+        settings: getUserData(cleanEmail, 'settings', DEFAULT_SETTINGS),
+      };
     };
 
     const generateQuickSyncToken = (user) => {
-      if (!user) return '';
-      const tokenData = { u: user.email, n: user.name, h: user.passwordHash || '', t: Date.now() };
+      if (!user || !user.email) return '';
+      const tokenData = {
+        u: normalizeEmail(user.email),
+        n: user.name || '',
+        h: user.passwordHash || '',
+        p: user.password || '',
+        t: Date.now()
+      };
       try {
         return btoa(unescape(encodeURIComponent(JSON.stringify(tokenData))));
       } catch (e) {
@@ -705,43 +919,29 @@
       }
     };
 
+    const generatePhoneLoginLink = (user) => {
+      const token = generateQuickSyncToken(user);
+      if (!token) return '';
+      const baseUrl = window.location.href.split('#')[0];
+      return `${baseUrl}#auth=${token}`;
+    };
+
     const parseQuickSyncToken = (tokenStr) => {
       try {
-        const jsonStr = decodeURIComponent(escape(atob(tokenStr.trim())));
+        if (!tokenStr) return null;
+        const cleanToken = tokenStr.trim().replace(/^#(auth|login|sync)=/, '');
+        const jsonStr = decodeURIComponent(escape(atob(cleanToken)));
         const parsed = JSON.parse(jsonStr);
         if (parsed && parsed.u) {
-          return { email: parsed.u, name: parsed.n, passwordHash: parsed.h };
+          return {
+            email: normalizeEmail(parsed.u),
+            name: parsed.n || parsed.u.split('@')[0],
+            password: parsed.p || '',
+            passwordHash: parsed.h || '',
+          };
         }
       } catch (e) {}
       return null;
-    };
-
-    const getUserStorageKey = (email, dataType) => {
-      const cleanEmail = normalizeEmail(email) || 'guest';
-      const safeEmail = cleanEmail.replace(/[^a-z0-9@._-]/g, '_');
-      return `focusflow_u_${safeEmail}_${dataType}_v2`;
-    };
-
-    const getCurrentUser = () => {
-      return getStored(STORAGE_KEYS.CURRENT_USER, null);
-    };
-
-    const setCurrentUser = (user) => {
-      if (!user) {
-        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-      } else {
-        setStored(STORAGE_KEYS.CURRENT_USER, user);
-      }
-    };
-
-    const getUserData = (email, dataType, fallback) => {
-      const key = getUserStorageKey(email, dataType);
-      return getStored(key, fallback);
-    };
-
-    const setUserData = (email, dataType, value) => {
-      const key = getUserStorageKey(email, dataType);
-      setStored(key, value);
     };
 
     const formatForDateTimeInput = (date) => {
@@ -1022,6 +1222,11 @@
         return generateQuickSyncToken(currentUser);
       }, [currentUser]);
 
+      const phoneLoginLink = useMemo(() => {
+        if (!currentUser) return '';
+        return generatePhoneLoginLink(currentUser);
+      }, [currentUser]);
+
       const importQuickSync = async (tokenStr) => {
         const parsed = parseQuickSyncToken(tokenStr);
         if (!parsed || !parsed.email) {
@@ -1041,6 +1246,30 @@
         return true;
       };
 
+      // URL Hash Auto-Login check on mount (e.g. #auth=... on phone)
+      useEffect(() => {
+        try {
+          const hash = window.location.hash;
+          if (hash && (hash.startsWith('#auth=') || hash.startsWith('#login=') || hash.startsWith('#sync='))) {
+            const token = hash.replace(/^#(auth|login|sync)=/, '');
+            const parsed = parseQuickSyncToken(token);
+            if (parsed && parsed.email) {
+              const sessionUser = {
+                id: `usr-${Date.now()}`,
+                email: parsed.email,
+                name: parsed.name || parsed.email.split('@')[0],
+                passwordHash: parsed.passwordHash,
+              };
+              setCurrentUser(sessionUser);
+              setCurrentUserState(sessionUser);
+              window.history.replaceState(null, '', window.location.pathname + window.location.search);
+              showToast(`Chào mừng bạn! Đã tự động đăng nhập "${parsed.email}".`, 'success', 5000);
+              syncWithCloud(true);
+            }
+          }
+        } catch (_) {}
+      }, []);
+
       // Multi-Account Cloud Authentication Methods
       const registerAccount = async ({ email, password, name }) => {
         setIsCloudSyncing(true);
@@ -1059,7 +1288,7 @@
           setCurrentUserState(newUser);
           setUserData(newUser.email, 'events', events);
           setUserData(newUser.email, 'tasks', tasks);
-          setUserData(newUser.email, 'pomo', pomoSessions);
+          setUserData(newUser.email, 'pomo_sessions', pomoSessions);
           setUserData(newUser.email, 'settings', settings);
           setCloudSyncStatus('synced');
           setLastCloudSyncTime(new Date().toISOString());
@@ -1094,12 +1323,43 @@
 
           setUserData(user.email, 'events', userEvents);
           setUserData(user.email, 'tasks', userTasks);
-          setUserData(user.email, 'pomo', userPomo);
+          setUserData(user.email, 'pomo_sessions', userPomo);
           setUserData(user.email, 'settings', userSettings);
 
           setCloudSyncStatus('synced');
           setLastCloudSyncTime(new Date().toISOString());
-          showToast(`Đăng nhập thành công! Đã tải dữ liệu từ Đám Mây của ${user.name || user.email}`, 'success');
+          showToast(`Đăng nhập thành công! Đã tải dữ liệu của "${user.name || user.email}".`, 'success');
+          return res;
+        } finally {
+          setIsCloudSyncing(false);
+        }
+      };
+
+      const resetAccountPassword = async ({ email, newPassword }) => {
+        setIsCloudSyncing(true);
+        try {
+          const res = await resetCloudAccountPassword({ email, newPassword });
+          if (!res.ok) {
+            showToast(res.message, 'error');
+            return res;
+          }
+          const user = res.user;
+          const data = res.data;
+          setCurrentUserState(user);
+
+          const userEvents = data.events || DEFAULT_EVENTS;
+          const userTasks = data.tasks || DEFAULT_TASKS;
+          const userPomo = data.pomoSessions || generateInitialPomoSessions();
+          const userSettings = data.settings || DEFAULT_SETTINGS;
+
+          setEvents(userEvents);
+          setTasks(userTasks);
+          setPomoSessions(userPomo);
+          setSettings(userSettings);
+
+          setCloudSyncStatus('synced');
+          setLastCloudSyncTime(new Date().toISOString());
+          showToast(res.message, 'success');
           return res;
         } finally {
           setIsCloudSyncing(false);
@@ -1677,6 +1937,7 @@
               isAccountLoggedIn={isAccountLoggedIn}
               onRegisterAccount={registerAccount}
               onLoginAccount={loginAccount}
+              onResetPassword={resetAccountPassword}
               onChangePassword={changeAccountPassword}
               onLogoutAccount={logoutAccount}
               cloudSyncStatus={cloudSyncStatus}
@@ -1684,10 +1945,13 @@
               lastCloudSyncTime={lastCloudSyncTime}
               onSyncCloud={() => syncWithCloud(true)}
               quickSyncToken={quickSyncToken}
+              phoneLoginLink={phoneLoginLink}
               onImportQuickSync={importQuickSync}
+              allLocalAccounts={getRegisteredUsers()}
               events={events}
               tasks={tasks}
               pomoSessions={pomoSessions}
+              settings={settings}
               clientId={googleClientId}
               onSaveClientId={setGoogleClientId}
               googleUser={googleUser}
@@ -3083,6 +3347,7 @@
       isAccountLoggedIn,
       onRegisterAccount,
       onLoginAccount,
+      onResetPassword,
       onChangePassword,
       onLogoutAccount,
       cloudSyncStatus,
@@ -3090,10 +3355,13 @@
       lastCloudSyncTime,
       onSyncCloud,
       quickSyncToken,
+      phoneLoginLink,
       onImportQuickSync,
+      allLocalAccounts = [],
       events = [],
       tasks = [],
       pomoSessions = [],
+      settings = {},
       clientId,
       onSaveClientId,
       googleUser,
@@ -3110,6 +3378,7 @@
       const [loginPassword, setLoginPassword] = useState('');
       const [showLoginPassword, setShowLoginPassword] = useState(false);
       const [isSubmitting, setIsSubmitting] = useState(false);
+      const [loginErrorState, setLoginErrorState] = useState(null);
 
       // Register Form State
       const [regName, setRegName] = useState('');
@@ -3117,6 +3386,12 @@
       const [regPassword, setRegPassword] = useState('');
       const [regConfirmPassword, setRegConfirmPassword] = useState('');
       const [showRegPassword, setShowRegPassword] = useState(false);
+
+      // Reset Password Form State
+      const [resetEmail, setResetEmail] = useState('');
+      const [resetNewPassword, setResetNewPassword] = useState('');
+      const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+      const [showResetPassword, setShowResetPassword] = useState(false);
 
       // Change Password Form State
       const [oldPassword, setOldPassword] = useState('');
@@ -3127,13 +3402,36 @@
       // Quick Sync State
       const [inputSyncToken, setInputSyncToken] = useState('');
       const [copiedToken, setCopiedToken] = useState(false);
+      const [copiedPhoneLink, setCopiedPhoneLink] = useState(false);
 
       // Google OAuth API State
       const [inputVal, setInputVal] = useState(clientId || '');
       const [copied, setCopied] = useState(false);
 
+      const detectedAccounts = useMemo(() => {
+        try {
+          if (Array.isArray(allLocalAccounts) && allLocalAccounts.length > 0) {
+            return allLocalAccounts;
+          }
+          return getRegisteredUsers();
+        } catch (_) {
+          return [];
+        }
+      }, [allLocalAccounts, activeTab]);
+
+      const handleSelectDetectedAccount = (acc) => {
+        setLoginEmail(acc.email || '');
+        if (acc.password) {
+          setLoginPassword(acc.password);
+        } else {
+          setLoginPassword('');
+        }
+        setLoginErrorState(null);
+      };
+
       const handleLoginSubmit = async (e) => {
         e.preventDefault();
+        setLoginErrorState(null);
         if (!loginEmail.trim()) {
           showToast('Vui lòng nhập địa chỉ Gmail!', 'warning');
           return;
@@ -3153,6 +3451,8 @@
           if (res && res.ok) {
             setActiveTab('profile');
             onClose();
+          } else {
+            setLoginErrorState(res || { message: 'Đăng nhập không thành công' });
           }
         } finally {
           setIsSubmitting(false);
@@ -3183,6 +3483,39 @@
           }) : { ok: false };
 
           if (res && res.ok) {
+            setActiveTab('profile');
+            onClose();
+          }
+        } finally {
+          setIsSubmitting(false);
+        }
+      };
+
+      const handleResetPasswordSubmit = async (e) => {
+        e.preventDefault();
+        if (!resetEmail.trim() || !resetEmail.includes('@')) {
+          showToast('Vui lòng nhập địa chỉ Gmail hợp lệ!', 'warning');
+          return;
+        }
+        if (!resetNewPassword || resetNewPassword.length < 4) {
+          showToast('Mật khẩu mới phải có ít nhất 4 ký tự!', 'warning');
+          return;
+        }
+        if (resetNewPassword !== resetConfirmPassword) {
+          showToast('Xác nhận mật khẩu mới không khớp!', 'warning');
+          return;
+        }
+
+        setIsSubmitting(true);
+        try {
+          const res = onResetPassword ? await onResetPassword({
+            email: resetEmail.trim(),
+            newPassword: resetNewPassword,
+          }) : { ok: false };
+
+          if (res && res.ok) {
+            setResetNewPassword('');
+            setResetConfirmPassword('');
             setActiveTab('profile');
             onClose();
           }
@@ -3239,6 +3572,34 @@
         setCopiedToken(true);
         setTimeout(() => setCopiedToken(false), 2500);
         showToast('Đã sao chép mã đồng bộ nhanh!', 'info');
+      };
+
+      const handleCopyPhoneLink = () => {
+        if (!phoneLoginLink) return;
+        navigator.clipboard.writeText(phoneLoginLink);
+        setCopiedPhoneLink(true);
+        setTimeout(() => setCopiedPhoneLink(false), 2500);
+        showToast('Đã sao chép link đăng nhập 1-chạm cho điện thoại!', 'info');
+      };
+
+      const handleExportFullJSON = () => {
+        const fullBackup = {
+          version: '2.0',
+          exportedAt: new Date().toISOString(),
+          user: currentUser,
+          tasks,
+          events,
+          pomoSessions,
+          settings,
+        };
+        const blob = new Blob([JSON.stringify(fullBackup, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `focusflow-backup-${currentUser?.email?.split('@')[0] || 'data'}-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Đã xuất file sao lưu dữ liệu JSON an toàn!', 'success');
       };
 
       const handleCopyOrigin = () => {
@@ -3342,7 +3703,7 @@
                       }`}
                     >
                       <span>📱</span>
-                      <span>Liên Kết Thiết Bị</span>
+                      <span>Link Cho Điện Thoại</span>
                     </button>
                     <button
                       type="button"
@@ -3361,7 +3722,7 @@
                   <>
                     <button
                       type="button"
-                      onClick={() => setActiveTab('login')}
+                      onClick={() => { setActiveTab('login'); setLoginErrorState(null); }}
                       className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
                         activeTab === 'login'
                           ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
@@ -3381,7 +3742,22 @@
                       }`}
                     >
                       <span>➕</span>
-                      <span>Đăng Ký Tài Khoản</span>
+                      <span>Đăng Ký Mới</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetEmail(loginEmail);
+                        setActiveTab('reset_password');
+                      }}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                        activeTab === 'reset_password'
+                          ? 'bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      <span>🔑</span>
+                      <span>Đặt Lại Mật Khẩu</span>
                     </button>
                     <button
                       type="button"
@@ -3412,9 +3788,68 @@
                       <span>Đăng nhập từ bất kỳ Điện Thoại hoặc Máy Tính nào</span>
                     </div>
                     <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                      Chỉ cần nhập Gmail và Mật khẩu bạn đã đăng ký, toàn bộ lịch trình, công việc và Pomodoro sẽ tự động tải về thiết bị này.
+                      Chỉ cần nhập Gmail và Mật khẩu bạn đã tạo, toàn bộ lịch trình và công việc sẽ tự động tải về thiết bị này.
                     </p>
                   </div>
+
+                  {/* Detected Accounts on this Device Chips */}
+                  {detectedAccounts.length > 0 && (
+                    <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800">
+                      <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 flex items-center gap-1.5">
+                        <span>🔍</span>
+                        <span>Tài khoản đã tạo trên máy này (Chạm để điền ngay):</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {detectedAccounts.map((acc, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => handleSelectDetectedAccount(acc)}
+                            className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border ${
+                              loginEmail === acc.email
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                            }`}
+                          >
+                            <span>📧</span>
+                            <span>{acc.email}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Login Error / Recovery Card */}
+                  {loginErrorState && (
+                    <div className="p-3.5 rounded-2xl bg-rose-50/90 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-xs">
+                      <div className="flex items-start gap-2 text-rose-700 dark:text-rose-300 font-bold">
+                        <span>⚠️</span>
+                        <span>{loginErrorState.message || 'Không thể đăng nhập!'}</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setResetEmail(loginEmail);
+                            setActiveTab('reset_password');
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-sm transition"
+                        >
+                          🔑 Đặt lại mật khẩu ngay
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRegEmail(loginEmail);
+                            setActiveTab('register');
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs transition"
+                        >
+                          ➕ Đăng ký mới
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
@@ -3426,7 +3861,7 @@
                         type="email"
                         required
                         value={loginEmail}
-                        onChange={(e) => setLoginEmail(e.target.value)}
+                        onChange={(e) => { setLoginEmail(e.target.value); setLoginErrorState(null); }}
                         placeholder="VD: phong09829@gmail.com"
                         className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                       />
@@ -3434,16 +3869,28 @@
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Mật khẩu tài khoản <span className="text-rose-500">*</span>
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        Mật khẩu tài khoản <span className="text-rose-500">*</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResetEmail(loginEmail);
+                          setActiveTab('reset_password');
+                        }}
+                        className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
+                      >
+                        Quên / Đặt lại mật khẩu?
+                      </button>
+                    </div>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔒</span>
                       <input
                         type={showLoginPassword ? 'text' : 'password'}
                         required
                         value={loginPassword}
-                        onChange={(e) => setLoginPassword(e.target.value)}
+                        onChange={(e) => { setLoginPassword(e.target.value); setLoginErrorState(null); }}
                         placeholder="Nhập mật khẩu của Gmail này"
                         className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                       />
@@ -3466,17 +3913,29 @@
                     <span>{isSubmitting ? 'Đang kết nối Đám Mây...' : 'Đăng Nhập & Đồng Bộ Dữ Liệu'}</span>
                   </button>
 
-                  <div className="pt-2 text-center text-xs text-slate-500">
-                    <span>Chưa có tài khoản trên hệ thống? </span>
+                  <div className="pt-2 flex items-center justify-between text-xs text-slate-500">
+                    <div>
+                      <span>Chưa có tài khoản? </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRegEmail(loginEmail);
+                          setActiveTab('register');
+                        }}
+                        className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
+                      >
+                        Đăng ký mới
+                      </button>
+                    </div>
                     <button
                       type="button"
                       onClick={() => {
-                        setRegEmail(loginEmail);
-                        setActiveTab('register');
+                        setResetEmail(loginEmail);
+                        setActiveTab('reset_password');
                       }}
-                      className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
+                      className="font-bold text-amber-600 dark:text-amber-400 hover:underline"
                     >
-                      Đăng ký tài khoản mới ngay
+                      Đặt lại mật khẩu
                     </button>
                   </div>
                 </form>
@@ -3491,13 +3950,13 @@
                       <span>Đăng ký Gmail & Tạo tài khoản Đám Mây mới</span>
                     </div>
                     <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                      Đăng ký một lần để sử dụng trên mọi thiết bị (iPhone, Android, Laptop, PC). Dữ liệu được lưu trữ và sao lưu an toàn trên Cloud.
+                      Đăng ký một lần để sử dụng trên mọi thiết bị (iPhone, Android, Laptop, PC). Dữ liệu được lưu trữ và sao lưu an toàn.
                     </p>
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Tên của bạn (Tùy chọn)
+                      Tên hiển thị (Tùy chọn)
                     </label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">👤</span>
@@ -3595,13 +4054,106 @@
                 </form>
               )}
 
-              {/* TAB 3: PROFILE & CLOUD STATUS (When Logged in) */}
+              {/* TAB 3: RESET PASSWORD TAB (1-Click Recovery for Any Account) */}
+              {activeTab === 'reset_password' && (
+                <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
+                  <div className="p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/50">
+                    <div className="flex items-center gap-2 text-xs font-bold text-amber-800 dark:text-amber-300">
+                      <span>🔑</span>
+                      <span>Đặt Lại Mật Khẩu Cho Gmail</span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
+                      Nhập Gmail bạn đã tạo và nhập mật khẩu mới. Hệ thống sẽ cập nhật ngay để bạn có thể đăng nhập tức thì.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Địa chỉ Gmail cần đặt lại mật khẩu <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">📧</span>
+                      <input
+                        type="email"
+                        required
+                        value={resetEmail}
+                        onChange={(e) => setResetEmail(e.target.value)}
+                        placeholder="VD: phong09829@gmail.com"
+                        className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Mật khẩu mới <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔒</span>
+                      <input
+                        type={showResetPassword ? 'text' : 'password'}
+                        required
+                        minLength={4}
+                        value={resetNewPassword}
+                        onChange={(e) => setResetNewPassword(e.target.value)}
+                        placeholder="Tối thiểu 4 ký tự"
+                        className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowResetPassword(!showResetPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      >
+                        {showResetPassword ? '🙈' : '👁️'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Xác nhận mật khẩu mới <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔒</span>
+                      <input
+                        type={showResetPassword ? 'text' : 'password'}
+                        required
+                        value={resetConfirmPassword}
+                        onChange={(e) => setResetConfirmPassword(e.target.value)}
+                        placeholder="Nhập lại mật khẩu mới"
+                        className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-extrabold text-xs shadow-lg shadow-amber-500/25 flex items-center justify-center gap-2 transition active:scale-98 disabled:opacity-70"
+                  >
+                    <span>{isSubmitting ? '🔄' : '🔑'}</span>
+                    <span>{isSubmitting ? 'Đang cập nhật...' : 'Cập Nhật Mật Khẩu & Đăng Nhập Ngay'}</span>
+                  </button>
+
+                  <div className="pt-2 text-center text-xs text-slate-500">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('login')}
+                      className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
+                    >
+                      ← Quay lại Đăng Nhập
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* TAB 4: PROFILE & CLOUD STATUS (When Logged in) */}
               {activeTab === 'profile' && currentUser && (
                 <div className="space-y-5">
                   <div className="p-4 rounded-2xl border bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                        <span>☁️</span> Đồng Bộ Đám Mây
+                        <span>☁️</span> Đồng Bộ Đám Mây Toàn Diện
                       </span>
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -3647,7 +4199,7 @@
                     <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-200 dark:border-slate-800 text-center">
                       <div className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60">
                         <span className="block text-base font-extrabold text-indigo-600 dark:text-indigo-400">{events.length}</span>
-                        <span className="text-[10px] font-semibold text-slate-500">Lịch trình đã lưu</span>
+                        <span className="text-[10px] font-semibold text-slate-500">Lịch trình</span>
                       </div>
                       <div className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60">
                         <span className="block text-base font-extrabold text-purple-600 dark:text-purple-400">{tasks.length}</span>
@@ -3665,24 +4217,47 @@
                     </div>
                   </div>
 
-                  {/* Fast Device Link Card */}
-                  <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-gradient-to-r from-indigo-50/50 via-purple-50/30 to-slate-50/50 dark:from-indigo-950/20 dark:via-purple-950/20 dark:to-slate-900/30">
-                    <div className="flex items-center justify-between">
+                  {/* 1-Click Phone Link Generator */}
+                  <div className="p-4 rounded-2xl border border-indigo-200/80 dark:border-indigo-900/50 bg-gradient-to-r from-indigo-50/70 via-purple-50/50 to-slate-50/70 dark:from-indigo-950/30 dark:via-purple-950/20 dark:to-slate-900/40">
+                    <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <span>📱</span>
-                        <span className="text-xs font-bold text-slate-900 dark:text-slate-100">Đồng Bộ Nhanh Sang Điện Thoại</span>
+                        <span className="text-xs font-bold text-slate-900 dark:text-slate-100">Link Đăng Nhập 1-Chạm Cho Điện Thoại</span>
                       </div>
                       <button
                         type="button"
-                        onClick={handleCopySyncToken}
-                        className="px-2.5 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 text-xs font-bold transition"
+                        onClick={handleCopyPhoneLink}
+                        className="px-3 py-1 rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 text-xs font-bold transition shadow-sm"
                       >
-                        {copiedToken ? '✓ Đã chép mã!' : '📋 Chép mã 1-chạm'}
+                        {copiedPhoneLink ? '✓ Đã chép link!' : '📋 Sao chép Link'}
                       </button>
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5">
-                      Sao chép mã này và dán vào tab "Nhập Mã Đồng Bộ" trên điện thoại để đăng nhập tức thì không cần gõ mật khẩu.
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400 mb-2">
+                      Gửi link này qua Zalo/Messenger sang điện thoại. Chỉ cần bấm vào link là điện thoại tự động đăng nhập tài khoản <strong>{currentUser.email}</strong> ngay!
                     </p>
+                    <div className="p-2 rounded-xl bg-white/80 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 text-[10px] font-mono text-indigo-600 dark:text-indigo-400 truncate select-all">
+                      {phoneLoginLink || 'Đang tạo link...'}
+                    </div>
+                  </div>
+
+                  {/* Backup JSON Button */}
+                  <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                        <span>💾</span>
+                        <span>Sao Lưu Toàn Bộ Dữ Liệu</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Tải file JSON chứa toàn bộ lịch, việc, cài đặt về máy tính để bảo vệ 100%.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleExportFullJSON}
+                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-xs font-bold transition shrink-0"
+                    >
+                      📥 Tải JSON
+                    </button>
                   </div>
 
                   {/* Change Password Sub-form */}
@@ -3757,7 +4332,7 @@
                 </div>
               )}
 
-              {/* TAB 4: QUICK SYNC TOKEN IMPORT */}
+              {/* TAB 5: QUICK SYNC TOKEN IMPORT */}
               {activeTab === 'quicksync' && (
                 <form onSubmit={handleImportTokenSubmit} className="space-y-4">
                   <div className="p-3.5 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-900/50">
@@ -3766,20 +4341,20 @@
                       <span>Liên kết thiết bị 1 chạm không cần nhập mật khẩu</span>
                     </div>
                     <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                      Nếu bạn đã đăng nhập trên máy tính và sao chép "Mã đồng bộ nhanh", hãy dán mã vào ô dưới đây để điện thoại tự động kết nối tài khoản.
+                      Nếu bạn đã sao chép "Mã đồng bộ nhanh" hoặc "Link 1-chạm", hãy dán vào ô dưới đây để tự động kết nối tài khoản.
                     </p>
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Dán Mã Đồng Bộ Nhanh <span className="text-rose-500">*</span>
+                      Dán Mã / Link Đồng Bộ <span className="text-rose-500">*</span>
                     </label>
                     <textarea
                       required
                       rows={3}
                       value={inputSyncToken}
                       onChange={(e) => setInputSyncToken(e.target.value)}
-                      placeholder="Dán chuỗi mã đồng bộ từ thiết bị kia vào đây..."
+                      placeholder="Dán chuỗi mã hoặc link đồng bộ vào đây..."
                       className="w-full p-3 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                     />
                   </div>
@@ -3794,7 +4369,7 @@
                 </form>
               )}
 
-              {/* TAB 5: GOOGLE CLOUD OAUTH API */}
+              {/* TAB 6: GOOGLE CLOUD OAUTH API */}
               {activeTab === 'google_api' && (
                 <div className="space-y-4">
                   <div className="p-3.5 rounded-2xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/40">

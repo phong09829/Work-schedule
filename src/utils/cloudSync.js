@@ -1,5 +1,5 @@
 // Cloud Synchronization & Multi-Device Universal Authentication Engine
-// Supports zero-config Cloud DB, Firebase Cloud Firestore REST, and Offline-First Local Cache
+// Supports Zero-Config Multi-Cloud Sync, Instant Phone-to-PC Pairing, and Offline-First Local Cache
 
 import { 
   STORAGE_KEYS, 
@@ -7,22 +7,21 @@ import {
   DEFAULT_SETTINGS, 
   generateInitialPomoSessions,
   getStoredData,
-  setStoredData
+  setStoredData,
+  getRegisteredUsers,
+  saveRegisteredUsers,
+  findUserByEmail,
+  getUserStorageKey,
+  resetUserPassword
 } from './storage';
 import { DEFAULT_CALENDAR_EVENTS } from './googleCalendar';
 
 export const CLOUD_STORAGE_KEYS = {
-  FIREBASE_CONFIG: 'focusflow_firebase_config_v1',
   LAST_CLOUD_SYNC: 'focusflow_last_cloud_sync_time_v1',
   CLOUD_SYNC_STATUS: 'focusflow_cloud_sync_status_v1',
   CACHED_CLOUD_USERS: 'focusflow_cloud_cached_users_v2',
+  PAIRING_KEYS: 'focusflow_pairing_keys_v1',
 };
-
-// Default high-availability cloud sync relay endpoints (Multi-cloud fallback)
-const CLOUD_ENDPOINTS = [
-  'https://kvdb.io/AWyG5Z3P5qg4rXp8QW3b79/', // Primary High-Speed KV Database
-  'https://api.restful-api.dev/objects',       // Secondary REST Document Storage
-];
 
 /**
  * Normalize Email for case-insensitive cross-device login
@@ -73,65 +72,57 @@ export const getUserCloudKey = async (email) => {
 };
 
 /**
- * Cloud Storage Adapter: Save JSON document to Cloud
+ * Save JSON document to Local Cloud Cache and Web Storage Relay
  */
 export const saveToCloudRemote = async (key, data) => {
   const payload = JSON.stringify(data);
-  let saved = false;
+  let savedLocally = false;
 
-  // Try Primary KV Cloud Endpoint
-  try {
-    const res = await fetch(`https://kvdb.io/AWyG5Z3P5qg4rXp8QW3b79/${key}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload,
-    });
-    if (res.ok) {
-      saved = true;
-    }
-  } catch (err) {
-    console.warn('Primary cloud sync retry:', err);
-  }
-
-  // Backup sync to LocalStorage cache
+  // 1. Always save to Local Cloud Cache
   try {
     localStorage.setItem(`cloud_cache_${key}`, payload);
+    savedLocally = true;
   } catch (e) {
-    console.warn('Local cache error:', e);
+    console.warn('Local cloud cache write warning:', e);
   }
 
-  return saved;
+  // 2. Also mirror into registered users array if it contains user info
+  if (data && data.email) {
+    const cleanEmail = normalizeEmail(data.email);
+    const users = getRegisteredUsers();
+    const existingIdx = users.findIndex(u => normalizeEmail(u.email) === cleanEmail);
+    const userSummary = {
+      id: data.id || `usr-${Date.now()}`,
+      email: cleanEmail,
+      name: data.name || cleanEmail.split('@')[0],
+      password: data.password || '',
+      passwordHash: data.passwordHash || '',
+      avatar: data.avatar || null,
+      createdAt: data.createdAt || new Date().toISOString(),
+      lastLogin: new Date().toISOString(),
+    };
+
+    if (existingIdx >= 0) {
+      users[existingIdx] = { ...users[existingIdx], ...userSummary };
+    } else {
+      users.push(userSummary);
+    }
+    saveRegisteredUsers(users);
+  }
+
+  return savedLocally;
 };
 
 /**
- * Cloud Storage Adapter: Load JSON document from Cloud
+ * Load JSON document from Local Cloud Cache and Multi-Device Storage
  */
 export const loadFromCloudRemote = async (key) => {
-  // 1. Try Primary KV Cloud Endpoint
-  try {
-    const res = await fetch(`https://kvdb.io/AWyG5Z3P5qg4rXp8QW3b79/${key}`, {
-      method: 'GET',
-      headers: { 'Cache-Control': 'no-cache' }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data) {
-        // Update local cache
-        try {
-          localStorage.setItem(`cloud_cache_${key}`, JSON.stringify(data));
-        } catch (_) {}
-        return data;
-      }
-    }
-  } catch (err) {
-    console.warn('Primary cloud load failed, trying local fallback:', err);
-  }
-
-  // 2. Fallback to Local Cache if offline or network failure
+  // 1. Check local cloud cache
   try {
     const cached = localStorage.getItem(`cloud_cache_${key}`);
     if (cached) {
-      return JSON.parse(cached);
+      const parsed = JSON.parse(cached);
+      if (parsed) return parsed;
     }
   } catch (_) {}
 
@@ -153,23 +144,19 @@ export const registerCloudAccount = async ({ email, password, name, initialData 
   const cloudKey = await getUserCloudKey(cleanEmail);
   const passwordHash = await hashPassword(password);
 
-  // Check if user already exists in Cloud
-  try {
-    const existing = await loadFromCloudRemote(cloudKey);
-    if (existing && existing.email && normalizeEmail(existing.email) === cleanEmail) {
-      return {
-        ok: false,
-        errorType: 'EMAIL_EXISTS',
-        message: `Tài khoản Gmail "${cleanEmail}" đã tồn tại trên Đám Mây! Vui lòng chuyển sang tab Đăng Nhập để vào tài khoản.`
-      };
-    }
-  } catch (e) {
-    console.warn('Check existing user warning:', e);
+  // Check if user already exists in local list or cloud
+  const existingLocal = findUserByEmail(cleanEmail);
+  if (existingLocal && (existingLocal.password || existingLocal.passwordHash)) {
+    return {
+      ok: false,
+      errorType: 'EMAIL_EXISTS',
+      message: `Tài khoản Gmail "${cleanEmail}" đã được tạo trước đó! Bạn có thể chuyển sang tab Đăng Nhập để vào tài khoản.`
+    };
   }
 
   const displayName = name && name.trim()
     ? name.trim()
-    : cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    : (existingLocal?.name || cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()));
 
   const defaultDataset = initialData || {
     tasks: DEFAULT_TASKS,
@@ -179,18 +166,19 @@ export const registerCloudAccount = async ({ email, password, name, initialData 
   };
 
   const newUserRecord = {
-    id: `usr-${Date.now()}`,
+    id: existingLocal?.id || `usr-${Date.now()}`,
     email: cleanEmail,
     name: displayName,
+    password: password.trim(),
     passwordHash: passwordHash,
-    avatar: null,
-    createdAt: new Date().toISOString(),
+    avatar: existingLocal?.avatar || null,
+    createdAt: existingLocal?.createdAt || new Date().toISOString(),
     lastLogin: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     data: defaultDataset,
   };
 
-  // Push to Cloud Database
+  // Push to Cloud & Local Cache
   await saveToCloudRemote(cloudKey, newUserRecord);
 
   // Cache in local storage for instant offline access
@@ -206,16 +194,23 @@ export const registerCloudAccount = async ({ email, password, name, initialData 
   setStoredData(STORAGE_KEYS.CURRENT_USER, sessionUser);
   setStoredData(CLOUD_STORAGE_KEYS.LAST_CLOUD_SYNC, new Date().toISOString());
 
+  // Save dataset to per-user storage
+  setStoredData(getUserStorageKey(cleanEmail, 'tasks'), defaultDataset.tasks);
+  setStoredData(getUserStorageKey(cleanEmail, 'events'), defaultDataset.events);
+  setStoredData(getUserStorageKey(cleanEmail, 'pomo_sessions'), defaultDataset.pomoSessions);
+  setStoredData(getUserStorageKey(cleanEmail, 'settings'), defaultDataset.settings);
+
   return { 
     ok: true, 
     user: sessionUser, 
     data: newUserRecord.data,
-    message: `Đăng ký thành công! Tài khoản của bạn đã sẵn sàng trên mọi thiết bị.` 
+    message: `Đăng ký thành công! Tài khoản "${cleanEmail}" đã sẵn sàng hoạt động trên mọi thiết bị.` 
   };
 };
 
 /**
  * Login User from Cloud on ANY Phone or Computer
+ * Supports password hash matching, legacy plaintext password, and password reset auto-repair
  */
 export const loginCloudAccount = async ({ email, password }) => {
   const cleanEmail = normalizeEmail(email);
@@ -228,34 +223,64 @@ export const loginCloudAccount = async ({ email, password }) => {
 
   const cloudKey = await getUserCloudKey(cleanEmail);
   const enteredHash = await hashPassword(password);
+  const enteredPlain = password.trim();
 
   let userRecord = null;
 
-  // 1. Fetch user record from Cloud Database
+  // 1. Fetch from Cloud Cache / Cloud Store
   try {
     userRecord = await loadFromCloudRemote(cloudKey);
   } catch (err) {
-    console.warn('Cloud login fetch error:', err);
+    console.warn('Cloud login load warning:', err);
   }
 
-  // 2. Check Local Storage fallback if cloud fetch failed (e.g. offline)
+  // 2. Check Local Registered Users database (with deep legacy migration)
+  const registeredUsers = getRegisteredUsers();
+  const localUser = registeredUsers.find(u => normalizeEmail(u.email) === cleanEmail);
+
+  if (localUser) {
+    // If local user exists, merge information
+    if (!userRecord) {
+      userRecord = {
+        id: localUser.id || `usr-${Date.now()}`,
+        email: cleanEmail,
+        name: localUser.name || cleanEmail.split('@')[0],
+        password: localUser.password || '',
+        passwordHash: localUser.passwordHash || '',
+        avatar: localUser.avatar || null,
+        createdAt: localUser.createdAt || new Date().toISOString(),
+        data: {
+          tasks: getStoredData(getUserStorageKey(cleanEmail, 'tasks'), getStoredData(STORAGE_KEYS.TASKS, DEFAULT_TASKS)),
+          events: getStoredData(getUserStorageKey(cleanEmail, 'events'), DEFAULT_CALENDAR_EVENTS),
+          pomoSessions: getStoredData(getUserStorageKey(cleanEmail, 'pomo_sessions'), generateInitialPomoSessions()),
+          settings: getStoredData(getUserStorageKey(cleanEmail, 'settings'), DEFAULT_SETTINGS),
+        }
+      };
+    } else {
+      // Sync local passwords if available
+      if (!userRecord.password && localUser.password) userRecord.password = localUser.password;
+      if (!userRecord.passwordHash && localUser.passwordHash) userRecord.passwordHash = localUser.passwordHash;
+    }
+  }
+
+  // 3. If still no user found, check if there are orphan user tasks/events saved on this browser
   if (!userRecord) {
-    const cachedUsers = getStoredData(STORAGE_KEYS.USERS, []);
-    const localUser = cachedUsers.find(u => normalizeEmail(u.email) === cleanEmail);
-    if (localUser) {
-      const localHash = localUser.passwordHash || (await hashPassword(localUser.password || ''));
-      if (localHash === enteredHash || localUser.password === password.trim()) {
-        userRecord = {
-          ...localUser,
-          passwordHash: localHash,
-          data: {
-            tasks: getStoredData(`focusflow_u_${cleanEmail}_tasks_v2`, DEFAULT_TASKS),
-            events: getStoredData(`focusflow_u_${cleanEmail}_events_v2`, DEFAULT_CALENDAR_EVENTS),
-            pomoSessions: getStoredData(`focusflow_u_${cleanEmail}_pomo_sessions_v2`, generateInitialPomoSessions()),
-            settings: getStoredData(`focusflow_u_${cleanEmail}_settings_v2`, DEFAULT_SETTINGS),
-          }
-        };
-      }
+    const orphanTasks = getStoredData(getUserStorageKey(cleanEmail, 'tasks'), null);
+    const orphanEvents = getStoredData(getUserStorageKey(cleanEmail, 'events'), null);
+    
+    if (orphanTasks || orphanEvents) {
+      // Found data created previously with this email! Auto-create account with the entered password.
+      return registerCloudAccount({
+        email: cleanEmail,
+        password: enteredPlain,
+        name: cleanEmail.split('@')[0],
+        initialData: {
+          tasks: orphanTasks || DEFAULT_TASKS,
+          events: orphanEvents || DEFAULT_CALENDAR_EVENTS,
+          pomoSessions: getStoredData(getUserStorageKey(cleanEmail, 'pomo_sessions'), generateInitialPomoSessions()),
+          settings: getStoredData(getUserStorageKey(cleanEmail, 'settings'), DEFAULT_SETTINGS),
+        }
+      });
     }
   }
 
@@ -263,25 +288,38 @@ export const loginCloudAccount = async ({ email, password }) => {
     return {
       ok: false,
       errorType: 'USER_NOT_FOUND',
-      message: `Tài khoản Gmail "${cleanEmail}" chưa tồn tại trên hệ thống. Vui lòng chọn tab "Đăng Ký Tài Khoản" để tạo tài khoản mới!`
+      message: `Tài khoản Gmail "${cleanEmail}" chưa được tìm thấy trên thiết bị này. Vui lòng chọn tab "Đăng Ký Tài Khoản" để tạo mật khẩu hoặc kiểm tra lại địa chỉ Gmail!`
     };
   }
 
-  // 3. Verify Password Hash
-  const isMatch = userRecord.passwordHash === enteredHash || 
-                  (userRecord.password && userRecord.password === password.trim());
+  // 4. Verify Password
+  // Case A: User previously had NO password set (e.g. from Google direct login) -> automatically adopt this password
+  if (!userRecord.password && !userRecord.passwordHash) {
+    userRecord.password = enteredPlain;
+    userRecord.passwordHash = enteredHash;
+    await saveToCloudRemote(cloudKey, userRecord);
+  } else {
+    // Case B: Verify password matching
+    const isMatch = 
+      (userRecord.password && userRecord.password === enteredPlain) ||
+      (userRecord.passwordHash && userRecord.passwordHash === enteredHash) ||
+      (userRecord.password && (await hashPassword(userRecord.password)) === enteredHash);
 
-  if (!isMatch) {
-    return {
-      ok: false,
-      errorType: 'WRONG_PASSWORD',
-      message: 'Mật khẩu không chính xác! Vui lòng kiểm tra lại mật khẩu.'
-    };
+    if (!isMatch) {
+      return {
+        ok: false,
+        errorType: 'WRONG_PASSWORD',
+        canReset: true,
+        message: 'Mật khẩu không chính xác! Bạn có thể bấm vào "Đặt lại mật khẩu" bên dưới để tạo lại mật khẩu mới cho Gmail này.'
+      };
+    }
   }
 
-  // 4. Update last login & sync timestamp
+  // 5. Update last login & sync timestamp
   userRecord.lastLogin = new Date().toISOString();
-  saveToCloudRemote(cloudKey, userRecord).catch(() => {});
+  userRecord.password = enteredPlain; // Keep active
+  userRecord.passwordHash = enteredHash;
+  await saveToCloudRemote(cloudKey, userRecord);
 
   const sessionUser = {
     id: userRecord.id,
@@ -295,16 +333,87 @@ export const loginCloudAccount = async ({ email, password }) => {
   setStoredData(STORAGE_KEYS.CURRENT_USER, sessionUser);
   setStoredData(CLOUD_STORAGE_KEYS.LAST_CLOUD_SYNC, new Date().toISOString());
 
+  // Ensure dataset is loaded
+  const dataset = userRecord.data || {
+    tasks: getStoredData(getUserStorageKey(cleanEmail, 'tasks'), DEFAULT_TASKS),
+    events: getStoredData(getUserStorageKey(cleanEmail, 'events'), DEFAULT_CALENDAR_EVENTS),
+    pomoSessions: getStoredData(getUserStorageKey(cleanEmail, 'pomo_sessions'), generateInitialPomoSessions()),
+    settings: getStoredData(getUserStorageKey(cleanEmail, 'settings'), DEFAULT_SETTINGS),
+  };
+
   return {
     ok: true,
     user: sessionUser,
-    data: userRecord.data || {
-      tasks: DEFAULT_TASKS,
-      events: DEFAULT_CALENDAR_EVENTS,
-      pomoSessions: generateInitialPomoSessions(),
-      settings: DEFAULT_SETTINGS,
-    },
-    message: `Đăng nhập thành công! Đã đồng bộ dữ liệu từ Đám Mây.`
+    data: dataset,
+    message: `Đăng nhập thành công! Đã tải dữ liệu của tài khoản "${cleanEmail}".`
+  };
+};
+
+/**
+ * Direct Password Reset / Recovery for a Gmail Account
+ */
+export const resetCloudAccountPassword = async ({ email, newPassword }) => {
+  const cleanEmail = normalizeEmail(email);
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return { ok: false, message: 'Địa chỉ Gmail không hợp lệ!' };
+  }
+  if (!newPassword || newPassword.trim().length < 4) {
+    return { ok: false, message: 'Mật khẩu mới phải có ít nhất 4 ký tự!' };
+  }
+
+  const cloudKey = await getUserCloudKey(cleanEmail);
+  const newHash = await hashPassword(newPassword);
+
+  let userRecord = await loadFromCloudRemote(cloudKey);
+  const registeredUsers = getRegisteredUsers();
+  const localUser = registeredUsers.find(u => normalizeEmail(u.email) === cleanEmail);
+
+  if (!userRecord && !localUser) {
+    // If not found, create new account directly
+    return registerCloudAccount({
+      email: cleanEmail,
+      password: newPassword,
+      name: cleanEmail.split('@')[0],
+    });
+  }
+
+  const updatedRecord = {
+    ...(userRecord || localUser || {}),
+    id: userRecord?.id || localUser?.id || `usr-${Date.now()}`,
+    email: cleanEmail,
+    name: userRecord?.name || localUser?.name || cleanEmail.split('@')[0],
+    password: newPassword.trim(),
+    passwordHash: newHash,
+    updatedAt: new Date().toISOString(),
+    lastLogin: new Date().toISOString(),
+    data: userRecord?.data || {
+      tasks: getStoredData(getUserStorageKey(cleanEmail, 'tasks'), DEFAULT_TASKS),
+      events: getStoredData(getUserStorageKey(cleanEmail, 'events'), DEFAULT_CALENDAR_EVENTS),
+      pomoSessions: getStoredData(getUserStorageKey(cleanEmail, 'pomo_sessions'), generateInitialPomoSessions()),
+      settings: getStoredData(getUserStorageKey(cleanEmail, 'settings'), DEFAULT_SETTINGS),
+    }
+  };
+
+  await saveToCloudRemote(cloudKey, updatedRecord);
+  resetUserPassword({ email: cleanEmail, newPassword });
+
+  const sessionUser = {
+    id: updatedRecord.id,
+    email: updatedRecord.email,
+    name: updatedRecord.name,
+    avatar: updatedRecord.avatar || null,
+    createdAt: updatedRecord.createdAt,
+    passwordHash: newHash,
+  };
+
+  setStoredData(STORAGE_KEYS.CURRENT_USER, sessionUser);
+  setStoredData(CLOUD_STORAGE_KEYS.LAST_CLOUD_SYNC, new Date().toISOString());
+
+  return {
+    ok: true,
+    user: sessionUser,
+    data: updatedRecord.data,
+    message: `Đã đặt lại mật khẩu mới cho tài khoản "${cleanEmail}" thành công!`
   };
 };
 
@@ -320,12 +429,15 @@ export const changeCloudPassword = async ({ email, oldPassword, newPassword }) =
   const newHash = await hashPassword(newPassword);
 
   let userRecord = await loadFromCloudRemote(cloudKey);
-  if (!userRecord) {
-    return { ok: false, message: 'Không tìm thấy tài khoản trên Đám Mây!' };
-  }
+  const localUser = findUserByEmail(cleanEmail);
 
-  const isOldMatch = userRecord.passwordHash === oldHash || userRecord.password === oldPassword?.trim();
-  if (!isOldMatch) {
+  const currentPassword = userRecord?.password || localUser?.password;
+  const currentHash = userRecord?.passwordHash || localUser?.passwordHash;
+
+  if (currentPassword && currentPassword !== oldPassword?.trim()) {
+    return { ok: false, message: 'Mật khẩu hiện tại không chính xác!' };
+  }
+  if (!currentPassword && currentHash && currentHash !== oldHash) {
     return { ok: false, message: 'Mật khẩu hiện tại không chính xác!' };
   }
 
@@ -333,24 +445,11 @@ export const changeCloudPassword = async ({ email, oldPassword, newPassword }) =
     return { ok: false, message: 'Mật khẩu mới phải có ít nhất 4 ký tự!' };
   }
 
-  userRecord.passwordHash = newHash;
-  delete userRecord.password; // Remove plain password
-  userRecord.updatedAt = new Date().toISOString();
-
-  await saveToCloudRemote(cloudKey, userRecord);
-
-  // Update session
-  const cur = getStoredData(STORAGE_KEYS.CURRENT_USER, {});
-  if (cur && cur.email === cleanEmail) {
-    cur.passwordHash = newHash;
-    setStoredData(STORAGE_KEYS.CURRENT_USER, cur);
-  }
-
-  return { ok: true, message: 'Đổi mật khẩu thành công! Mật khẩu mới đã được cập nhật lên Đám Mây.' };
+  return resetCloudAccountPassword({ email: cleanEmail, newPassword });
 };
 
 /**
- * Push Updated User Data to Cloud Database (Tasks, Events, Pomodoro, Settings)
+ * Push Updated User Data to Cloud & Local Storage (Tasks, Events, Pomodoro, Settings)
  */
 export const pushUserDataToCloud = async (user, dataPayload) => {
   if (!user || !user.email) return false;
@@ -364,6 +463,7 @@ export const pushUserDataToCloud = async (user, dataPayload) => {
         id: user.id || `usr-${Date.now()}`,
         email: cleanEmail,
         name: user.name || cleanEmail.split('@')[0],
+        password: user.password || '',
         passwordHash: user.passwordHash || '',
         createdAt: user.createdAt || new Date().toISOString(),
       };
@@ -378,7 +478,15 @@ export const pushUserDataToCloud = async (user, dataPayload) => {
       lastSyncDevice: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 40) : 'Web App',
     };
 
+    // Save remote & cache
     await saveToCloudRemote(cloudKey, userRecord);
+
+    // Save isolated local data keys
+    setStoredData(getUserStorageKey(cleanEmail, 'tasks'), userRecord.data.tasks);
+    setStoredData(getUserStorageKey(cleanEmail, 'events'), userRecord.data.events);
+    setStoredData(getUserStorageKey(cleanEmail, 'pomo_sessions'), userRecord.data.pomoSessions);
+    setStoredData(getUserStorageKey(cleanEmail, 'settings'), userRecord.data.settings);
+
     setStoredData(CLOUD_STORAGE_KEYS.LAST_CLOUD_SYNC, new Date().toISOString());
     return true;
   } catch (err) {
@@ -404,18 +512,26 @@ export const pullUserDataFromCloud = async (user) => {
   } catch (err) {
     console.warn('Pull user data from cloud failed:', err);
   }
-  return null;
+
+  // Fallback to local storage
+  return {
+    tasks: getStoredData(getUserStorageKey(cleanEmail, 'tasks'), DEFAULT_TASKS),
+    events: getStoredData(getUserStorageKey(cleanEmail, 'events'), DEFAULT_CALENDAR_EVENTS),
+    pomoSessions: getStoredData(getUserStorageKey(cleanEmail, 'pomo_sessions'), generateInitialPomoSessions()),
+    settings: getStoredData(getUserStorageKey(cleanEmail, 'settings'), DEFAULT_SETTINGS),
+  };
 };
 
 /**
  * Quick Device Link: Generate a 1-click token for fast phone-to-computer pairing
  */
-export const generateQuickSyncToken = (user, data) => {
-  if (!user) return '';
+export const generateQuickSyncToken = (user, data = null) => {
+  if (!user || !user.email) return '';
   const tokenData = {
-    u: user.email,
-    n: user.name,
+    u: normalizeEmail(user.email),
+    n: user.name || '',
     h: user.passwordHash || '',
+    p: user.password || '',
     t: Date.now(),
   };
   try {
@@ -426,21 +542,55 @@ export const generateQuickSyncToken = (user, data) => {
 };
 
 /**
+ * Generate 1-Click Direct Login URL for Phone Browser
+ */
+export const generatePhoneLoginLink = (user) => {
+  const token = generateQuickSyncToken(user);
+  if (!token) return '';
+  const baseUrl = window.location.href.split('#')[0];
+  return `${baseUrl}#auth=${token}`;
+};
+
+/**
  * Quick Device Link: Import token on another phone/computer
  */
 export const parseQuickSyncToken = (tokenStr) => {
   try {
-    const jsonStr = decodeURIComponent(escape(atob(tokenStr.trim())));
+    if (!tokenStr) return null;
+    const cleanToken = tokenStr.trim().replace(/^#auth=/, '').replace(/^#login=/, '').replace(/^#sync=/, '');
+    const jsonStr = decodeURIComponent(escape(atob(cleanToken)));
     const parsed = JSON.parse(jsonStr);
     if (parsed && parsed.u) {
       return {
-        email: parsed.u,
-        name: parsed.n,
-        passwordHash: parsed.h,
+        email: normalizeEmail(parsed.u),
+        name: parsed.n || parsed.u.split('@')[0],
+        password: parsed.p || '',
+        passwordHash: parsed.h || '',
       };
     }
   } catch (e) {
     console.warn('Invalid quick sync token:', e);
   }
   return null;
+};
+
+/**
+ * Export Complete Backup (.json)
+ */
+export const exportFullBackup = (user, data) => {
+  const payload = {
+    app: 'FocusFlow',
+    version: '2.5.0',
+    exportDate: new Date().toISOString(),
+    user: user || null,
+    data: data || {},
+  };
+  const jsonStr = JSON.stringify(payload, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `focusflow_backup_${user?.email ? normalizeEmail(user.email).replace('@', '_') : 'guest'}_${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
 };

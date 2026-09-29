@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   CheckCircle2, 
@@ -23,15 +23,17 @@ import {
   Clock,
   ListTodo,
   Cloud,
-  CloudCheck,
   Smartphone,
   Laptop,
   ArrowRightLeft,
   Share2,
-  Download
+  Download,
+  RotateCcw,
+  FileJson
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { GOOGLE_SCOPES } from '../../utils/googleCalendar';
+import { exportFullBackup } from '../../utils/cloudSync';
 
 export const GoogleConfigModal = ({ isOpen, onClose }) => {
   const {
@@ -39,6 +41,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     isAccountLoggedIn,
     registerAccount,
     loginAccount,
+    resetAccountPassword,
     changeAccountPassword,
     logoutAccount,
     cloudSyncStatus,
@@ -46,7 +49,9 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     lastCloudSyncTime,
     syncWithCloud,
     quickSyncToken,
+    phoneLoginLink,
     importQuickSync,
+    getAllLocalAccounts,
     googleClientId,
     setGoogleClientId,
     googleUser,
@@ -57,18 +62,32 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     events,
     tasks,
     pomoSessions,
+    settings,
     showToast,
   } = useApp();
 
-  // Active Tab: 'login' | 'register' | 'profile' | 'quicksync' | 'google_api'
+  // Active Tab: 'login' | 'register' | 'reset_password' | 'profile' | 'quicksync' | 'google_api'
   const [activeTab, setActiveTab] = useState(() => {
     return isAccountLoggedIn ? 'profile' : 'login';
   });
+
+  // Local Accounts List
+  const [localAccounts, setLocalAccounts] = useState([]);
+
+  useEffect(() => {
+    if (isOpen && getAllLocalAccounts) {
+      try {
+        const accounts = getAllLocalAccounts();
+        setLocalAccounts(accounts || []);
+      } catch (_) {}
+    }
+  }, [isOpen, getAllLocalAccounts]);
 
   // Login Form State
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [loginError, setLoginError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Register Form State
@@ -78,7 +97,13 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
   const [regConfirmPassword, setRegConfirmPassword] = useState('');
   const [showRegPassword, setShowRegPassword] = useState(false);
 
-  // Change Password Form State
+  // Reset Password Form State
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+
+  // Change Password Form State (in Profile tab)
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
@@ -87,16 +112,19 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
   // Quick Sync State
   const [inputSyncToken, setInputSyncToken] = useState('');
   const [copiedToken, setCopiedToken] = useState(false);
+  const [copiedPhoneLink, setCopiedPhoneLink] = useState(false);
 
   // Google OAuth API State
   const [inputClientId, setInputClientId] = useState(googleClientId || '');
-  const [copied, setCopied] = useState(false);
+  const [copiedOrigin, setCopiedOrigin] = useState(false);
 
   if (!isOpen) return null;
 
   // Handle Login
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
+    setLoginError(null);
+
     if (!loginEmail.trim()) {
       showToast('Vui lòng nhập địa chỉ Gmail!', 'warning');
       return;
@@ -116,6 +144,8 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
       if (res.ok) {
         setActiveTab('profile');
         onClose();
+      } else {
+        setLoginError(res);
       }
     } finally {
       setIsSubmitting(false);
@@ -155,7 +185,39 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     }
   };
 
-  // Handle Change Password
+  // Handle Reset Password
+  const handleResetPasswordSubmit = async (e) => {
+    e.preventDefault();
+    if (!resetEmail.trim() || !resetEmail.includes('@')) {
+      showToast('Vui lòng nhập địa chỉ Gmail hợp lệ!', 'warning');
+      return;
+    }
+    if (!resetNewPassword || resetNewPassword.length < 4) {
+      showToast('Mật khẩu mới phải có ít nhất 4 ký tự!', 'warning');
+      return;
+    }
+    if (resetNewPassword !== resetConfirmPassword) {
+      showToast('Xác nhận mật khẩu mới không khớp!', 'warning');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await resetAccountPassword({
+        email: resetEmail.trim(),
+        newPassword: resetNewPassword,
+      });
+
+      if (res.ok) {
+        setActiveTab('profile');
+        onClose();
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Handle Change Password (inside Profile)
   const handleChangePasswordSubmit = async (e) => {
     e.preventDefault();
     if (!oldPassword) {
@@ -202,7 +264,20 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     navigator.clipboard.writeText(quickSyncToken);
     setCopiedToken(true);
     setTimeout(() => setCopiedToken(false), 2500);
-    showToast('Đã sao chép mã đồng bộ nhanh vào bộ nhớ tạm!', 'info');
+    showToast('Đã sao chép mã đồng bộ vào bộ nhớ tạm!', 'info');
+  };
+
+  const handleCopyPhoneLink = () => {
+    if (!phoneLoginLink) return;
+    navigator.clipboard.writeText(phoneLoginLink);
+    setCopiedPhoneLink(true);
+    setTimeout(() => setCopiedPhoneLink(false), 2500);
+    showToast('Đã sao chép link đăng nhập 1 chạm cho điện thoại!', 'success');
+  };
+
+  const handleExportBackup = () => {
+    exportFullBackup(currentUser, { tasks, events, pomoSessions, settings });
+    showToast('Đã xuất file sao lưu dữ liệu (.json) thành công!', 'success');
   };
 
   // Google OAuth triggers
@@ -213,10 +288,10 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
   };
 
   const handleCopyOrigin = () => {
-    const origin = window.location.origin;
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
     navigator.clipboard.writeText(origin);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedOrigin(true);
+    setTimeout(() => setCopiedOrigin(false), 2000);
     showToast('Đã sao chép Origin URL!', 'info');
   };
 
@@ -280,7 +355,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                 <span>Tài Khoản & Đồng Bộ Đám Mây</span>
               </h2>
               <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">
-                Đăng nhập trên bất kỳ điện thoại hoặc máy tính nào chỉ với Gmail & Mật khẩu
+                Đăng nhập trên bất kỳ điện thoại hoặc máy tính nào với Gmail & Mật khẩu
               </p>
             </div>
           </div>
@@ -320,7 +395,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                   }`}
                 >
                   <Smartphone className="w-3.5 h-3.5" />
-                  <span>Liên Kết Thiết Bị</span>
+                  <span>Liên Kết Điện Thoại</span>
                 </button>
                 <button
                   type="button"
@@ -347,7 +422,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                   }`}
                 >
                   <LogIn className="w-3.5 h-3.5" />
-                  <span>Đăng Nhập Gmail</span>
+                  <span>Đăng Nhập</span>
                 </button>
                 <button
                   type="button"
@@ -359,7 +434,19 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                   }`}
                 >
                   <UserPlus className="w-3.5 h-3.5" />
-                  <span>Đăng Ký Tài Khoản</span>
+                  <span>Đăng Ký Mới</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('reset_password')}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                    activeTab === 'reset_password'
+                      ? 'bg-white dark:bg-slate-800 text-brand-600 dark:text-brand-400 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Đặt Lại Mật Khẩu</span>
                 </button>
                 <button
                   type="button"
@@ -371,7 +458,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                   }`}
                 >
                   <ArrowRightLeft className="w-3.5 h-3.5" />
-                  <span>Nhập Mã Đồng Bộ</span>
+                  <span>Mã Ghép Nối</span>
                 </button>
               </>
             )}
@@ -390,9 +477,71 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                   <span>Đăng nhập đồng bộ từ bất kỳ Điện Thoại hoặc Máy Tính nào</span>
                 </div>
                 <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                  Chỉ cần nhập Gmail và Mật khẩu bạn đã đăng ký, toàn bộ lịch trình, công việc và Pomodoro sẽ tự động tải về thiết bị này.
+                  Nhập Gmail và Mật khẩu bạn đã tạo. Toàn bộ công việc, lịch trình và Pomodoro sẽ tự động hiển thị đầy đủ.
                 </p>
               </div>
+
+              {/* Detected Local Accounts on this Browser */}
+              {localAccounts.length > 0 && (
+                <div className="p-3 rounded-2xl bg-slate-100/80 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                  <div className="text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-2 flex items-center gap-1.5">
+                    <Laptop className="w-3.5 h-3.5 text-brand-500" />
+                    <span>Tài khoản đã dùng trên thiết bị này:</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {localAccounts.map((acc, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setLoginEmail(acc.email);
+                          if (acc.password) setLoginPassword(acc.password);
+                        }}
+                        className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition ${
+                          loginEmail === acc.email
+                            ? 'bg-brand-500 text-white border-brand-600 shadow-sm'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-brand-400'
+                        }`}
+                      >
+                        <Mail className="w-3 h-3" />
+                        <span>{acc.email}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Error Alert with Fast Reset Button */}
+              {loginError && (
+                <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-xs text-rose-700 dark:text-rose-300 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                    <span>{loginError.message}</span>
+                  </div>
+                  <div className="flex gap-2 pt-1 border-t border-rose-200 dark:border-rose-900/40">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetEmail(loginEmail);
+                        setActiveTab('reset_password');
+                      }}
+                      className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold transition"
+                    >
+                      👉 Đặt lại mật khẩu cho Gmail này
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRegEmail(loginEmail);
+                        setActiveTab('register');
+                      }}
+                      className="px-3 py-1 rounded-lg bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 text-slate-800 dark:text-slate-200 text-[11px] font-bold transition"
+                    >
+                      Đăng ký mới
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Gmail Input */}
               <div>
@@ -405,7 +554,10 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     type="email"
                     required
                     value={loginEmail}
-                    onChange={(e) => setLoginEmail(e.target.value)}
+                    onChange={(e) => {
+                      setLoginEmail(e.target.value);
+                      setLoginError(null);
+                    }}
                     placeholder="VD: phong09829@gmail.com"
                     className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
                   />
@@ -414,16 +566,31 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
 
               {/* Password Input */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Mật khẩu tài khoản <span className="text-rose-500">*</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Mật khẩu tài khoản <span className="text-rose-500">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetEmail(loginEmail);
+                      setActiveTab('reset_password');
+                    }}
+                    className="text-[11px] font-bold text-brand-600 dark:text-brand-400 hover:underline"
+                  >
+                    Quên mật khẩu?
+                  </button>
+                </div>
                 <div className="relative">
                   <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type={showLoginPassword ? 'text' : 'password'}
                     required
                     value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
+                    onChange={(e) => {
+                      setLoginPassword(e.target.value);
+                      setLoginError(null);
+                    }}
                     placeholder="Nhập mật khẩu tài khoản"
                     className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
                   />
@@ -448,11 +615,10 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                 ) : (
                   <LogIn className="w-4 h-4" />
                 )}
-                <span>{isSubmitting ? 'Đang kết nối Đám Mây...' : 'Đăng Nhập & Đồng Bộ Dữ Liệu'}</span>
+                <span>{isSubmitting ? 'Đang kiểm tra tài khoản...' : 'Đăng Nhập & Đồng Bộ Dữ Liệu'}</span>
               </button>
 
-              <div className="pt-2 text-center text-xs text-slate-500">
-                <span>Chưa có tài khoản trên hệ thống? </span>
+              <div className="pt-2 text-center text-xs text-slate-500 flex items-center justify-center gap-3">
                 <button
                   type="button"
                   onClick={() => {
@@ -461,7 +627,18 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                   }}
                   className="font-bold text-brand-600 dark:text-brand-400 hover:underline"
                 >
-                  Đăng ký tài khoản mới ngay
+                  ➕ Tạo tài khoản mới
+                </button>
+                <span>•</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResetEmail(loginEmail);
+                    setActiveTab('reset_password');
+                  }}
+                  className="font-bold text-slate-600 dark:text-slate-300 hover:underline"
+                >
+                  🔄 Đặt lại mật khẩu
                 </button>
               </div>
             </form>
@@ -473,10 +650,10 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
               <div className="p-3.5 rounded-2xl bg-purple-50/80 dark:bg-purple-950/40 border border-purple-200/80 dark:border-purple-900/50">
                 <div className="flex items-center gap-2 text-xs font-bold text-purple-700 dark:text-purple-300">
                   <UserPlus className="w-4 h-4 text-purple-500" />
-                  <span>Đăng ký Gmail & Tạo tài khoản Đám Mây mới</span>
+                  <span>Đăng ký Gmail & Tạo tài khoản mới</span>
                 </div>
                 <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                  Đăng ký một lần để sử dụng trên mọi thiết bị (iPhone, Android, Laptop, PC). Dữ liệu được lưu trữ và sao lưu an toàn trên Cloud.
+                  Đăng ký một lần để sử dụng trên mọi thiết bị (iPhone, Android, Laptop, PC). Toàn bộ dữ liệu được lưu an toàn.
                 </p>
               </div>
 
@@ -570,7 +747,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                 ) : (
                   <CheckCircle2 className="w-4 h-4" />
                 )}
-                <span>{isSubmitting ? 'Đang tạo tài khoản Đám Mây...' : 'Tạo Tài Khoản & Bật Đồng Bộ'}</span>
+                <span>{isSubmitting ? 'Đang tạo tài khoản...' : 'Tạo Tài Khoản & Bật Đồng Bộ'}</span>
               </button>
 
               <div className="pt-2 text-center text-xs text-slate-500">
@@ -589,7 +766,107 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
             </form>
           )}
 
-          {/* TAB 3: PROFILE & CLOUD STATUS (When Logged In) */}
+          {/* TAB 3: RESET PASSWORD FORM */}
+          {activeTab === 'reset_password' && (
+            <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
+              <div className="p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/50">
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-800 dark:text-amber-300">
+                  <RotateCcw className="w-4 h-4 text-amber-600" />
+                  <span>Đặt lại mật khẩu cho tài khoản Gmail</span>
+                </div>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
+                  Nếu bạn quên mật khẩu hoặc tạo tài khoản trước đó, hãy nhập Gmail và mật khẩu mới bạn muốn đặt để mở khóa tài khoản ngay lập tức.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Địa chỉ Gmail <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="email"
+                    required
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    placeholder="VD: phong09829@gmail.com"
+                    className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Mật khẩu mới <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type={showResetPassword ? 'text' : 'password'}
+                    required
+                    minLength={4}
+                    value={resetNewPassword}
+                    onChange={(e) => setResetNewPassword(e.target.value)}
+                    placeholder="Tối thiểu 4 ký tự"
+                    className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetPassword(!showResetPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  >
+                    {showResetPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Xác nhận lại Mật khẩu mới <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type={showResetPassword ? 'text' : 'password'}
+                    required
+                    value={resetConfirmPassword}
+                    onChange={(e) => setResetConfirmPassword(e.target.value)}
+                    placeholder="Nhập lại đúng mật khẩu mới"
+                    className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-600 to-brand-600 hover:from-amber-500 hover:to-brand-500 text-white font-extrabold text-xs shadow-lg shadow-amber-500/25 flex items-center justify-center gap-2 transition active:scale-98 disabled:opacity-70"
+              >
+                {isSubmitting ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4" />
+                )}
+                <span>{isSubmitting ? 'Đang cập nhật mật khẩu...' : 'Lưu Mật Khẩu & Đăng Nhập Ngay'}</span>
+              </button>
+
+              <div className="pt-2 text-center text-xs text-slate-500">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginEmail(resetEmail);
+                    setActiveTab('login');
+                  }}
+                  className="font-bold text-brand-600 dark:text-brand-400 hover:underline"
+                >
+                  Quay lại Đăng nhập
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* TAB 4: PROFILE & CLOUD STATUS (When Logged In) */}
           {activeTab === 'profile' && currentUser && (
             <div className="space-y-5">
               
@@ -612,7 +889,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     ) : (
                       <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                     )}
-                    {isCloudSyncing ? 'Đang đồng bộ...' : cloudSyncStatus === 'offline' ? 'Lưu ngoại tuyến' : 'Đã kết nối Đám Mây'}
+                    {isCloudSyncing ? 'Đang đồng bộ...' : cloudSyncStatus === 'offline' ? 'Lưu ngoại tuyến' : 'Đã kết nối'}
                   </span>
                 </div>
 
@@ -635,7 +912,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                       onClick={() => syncWithCloud(true)}
                       disabled={isCloudSyncing}
                       className="p-2 rounded-xl text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-500/10 border border-brand-200/60 dark:border-brand-900/40 text-xs font-bold transition"
-                      title="Đồng bộ ngay với máy chủ Đám Mây"
+                      title="Đồng bộ ngay dữ liệu"
                     >
                       <RefreshCw className={`w-4 h-4 ${isCloudSyncing ? 'animate-spin' : ''}`} />
                     </button>
@@ -654,7 +931,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                 <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-200 dark:border-slate-800 text-center">
                   <div className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60">
                     <span className="block text-base font-extrabold text-brand-600 dark:text-brand-400">{events.length}</span>
-                    <span className="text-[10px] font-semibold text-slate-500">Lịch trình lưu</span>
+                    <span className="text-[10px] font-semibold text-slate-500">Lịch trình</span>
                   </div>
                   <div className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60">
                     <span className="block text-base font-extrabold text-indigo-600 dark:text-indigo-400">{tasks.length}</span>
@@ -662,7 +939,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                   </div>
                   <div className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60">
                     <span className="block text-base font-extrabold text-purple-600 dark:text-purple-400">{pomoSessions.length}</span>
-                    <span className="text-[10px] font-semibold text-slate-500">Phiên Pomodoro</span>
+                    <span className="text-[10px] font-semibold text-slate-500">Pomodoro</span>
                   </div>
                 </div>
 
@@ -672,27 +949,6 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     {formatSyncTime(lastCloudSyncTime)}
                   </span>
                 </div>
-              </div>
-
-              {/* Fast Device Link Card */}
-              <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-gradient-to-r from-brand-50/50 via-purple-50/30 to-slate-50/50 dark:from-brand-950/20 dark:via-purple-950/20 dark:to-slate-900/30">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Smartphone className="w-4 h-4 text-brand-500" />
-                    <span className="text-xs font-bold text-slate-900 dark:text-slate-100">Đồng Bộ Nhanh Sang Điện Thoại</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleCopySyncToken}
-                    className="px-2.5 py-1 rounded-lg bg-brand-600 text-white hover:bg-brand-500 text-xs font-bold flex items-center gap-1.5 transition"
-                  >
-                    {copiedToken ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                    <span>{copiedToken ? 'Đã chép mã!' : 'Chép mã 1-chạm'}</span>
-                  </button>
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5">
-                  Sao chép mã này và gửi sang điện thoại (hoặc dán vào tab "Nhập Mã Đồng Bộ" trên máy khác) để đăng nhập tức thì không cần gõ mật khẩu.
-                </p>
               </div>
 
               {/* Change Password Sub-form */}
@@ -761,7 +1017,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     type="submit"
                     className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md transition"
                   >
-                    Cập Nhật Mật Khẩu Đám Mây
+                    Cập Nhật Mật Khẩu
                   </button>
                 </div>
               </form>
@@ -769,44 +1025,98 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
             </div>
           )}
 
-          {/* TAB 4: QUICK SYNC TOKEN IMPORT */}
+          {/* TAB 5: PHONE LINKING & DATA BACKUP */}
           {activeTab === 'quicksync' && (
-            <form onSubmit={handleImportTokenSubmit} className="space-y-4">
-              <div className="p-3.5 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-900/50">
-                <div className="flex items-center gap-2 text-xs font-bold text-indigo-700 dark:text-indigo-300">
-                  <Smartphone className="w-4 h-4 text-indigo-500" />
-                  <span>Liên kết thiết bị 1 chạm không cần nhập mật khẩu</span>
+            <div className="space-y-4">
+              
+              {/* Option 1: 1-Click Phone Link (Best for mobile) */}
+              {isAccountLoggedIn && (
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-brand-50/70 via-purple-50/50 to-indigo-50/70 dark:from-brand-950/30 dark:via-purple-950/20 dark:to-indigo-950/30 border border-brand-200/80 dark:border-brand-900/50 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Smartphone className="w-5 h-5 text-brand-600 dark:text-brand-400" />
+                      <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                        Link Đăng Nhập 1-Chạm Cho Điện Thoại
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyPhoneLink}
+                      className="px-3 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold flex items-center gap-1.5 shadow transition active:scale-95"
+                    >
+                      {copiedPhoneLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedPhoneLink ? 'Đã sao chép Link!' : 'Sao chép Link'}</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                    Chỉ cần copy đường link này và gửi sang Zalo / Messenger / Tin nhắn rồi mở trên điện thoại. Ứng dụng sẽ tự động đăng nhập và tải dữ liệu ngay lập tức!
+                  </p>
                 </div>
-                <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                  Nếu bạn đã đăng nhập trên máy tính và sao chép "Mã đồng bộ nhanh", hãy dán mã vào ô dưới đây để điện thoại tự động kết nối tài khoản.
-                </p>
+              )}
+
+              {/* Option 2: Quick Token Pairing */}
+              <form onSubmit={handleImportTokenSubmit} className="space-y-3.5 p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <ArrowRightLeft className="w-4 h-4 text-indigo-500" />
+                    Nhập mã ghép nối từ thiết bị khác
+                  </span>
+                  {isAccountLoggedIn && (
+                    <button
+                      type="button"
+                      onClick={handleCopySyncToken}
+                      className="text-xs text-brand-600 dark:text-brand-400 font-bold hover:underline flex items-center gap-1"
+                    >
+                      {copiedToken ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedToken ? 'Đã chép mã' : 'Chép mã máy này'}</span>
+                    </button>
+                  )}
+                </div>
+
+                <div>
+                  <textarea
+                    required
+                    rows={2}
+                    value={inputSyncToken}
+                    onChange={(e) => setInputSyncToken(e.target.value)}
+                    placeholder="Dán mã ghép nối từ máy tính/điện thoại kia vào đây..."
+                    className="w-full p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition active:scale-98"
+                >
+                  Liên Kết & Đồng Bộ Thiết Bị Ngay
+                </button>
+              </form>
+
+              {/* Option 3: Full Backup JSON File */}
+              <div className="p-3.5 rounded-2xl bg-slate-100/70 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <FileJson className="w-4 h-4 text-purple-500" />
+                    Sao Lưu File Dữ Liệu (.json)
+                  </span>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Tải về toàn bộ công việc và lịch trình thành 1 file offline.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExportBackup}
+                  className="px-3 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 transition"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Tải File</span>
+                </button>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Dán Mã Đồng Bộ Nhanh <span className="text-rose-500">*</span>
-                </label>
-                <textarea
-                  required
-                  rows={3}
-                  value={inputSyncToken}
-                  onChange={(e) => setInputSyncToken(e.target.value)}
-                  placeholder="Dán chuỗi mã đồng bộ từ thiết bị kia vào đây..."
-                  className="w-full p-3 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-3 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition active:scale-98"
-              >
-                <ArrowRightLeft className="w-4 h-4" />
-                <span>Liên Kết Thiết Bị Ngay</span>
-              </button>
-            </form>
+            </div>
           )}
 
-          {/* TAB 5: GOOGLE CLOUD OAUTH API */}
+          {/* TAB 6: GOOGLE CLOUD OAUTH API */}
           {activeTab === 'google_api' && (
             <div className="space-y-4">
               <div className="p-3.5 rounded-2xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/40">
@@ -874,8 +1184,8 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     onClick={handleCopyOrigin}
                     className="p-1 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-bold flex items-center gap-1"
                   >
-                    {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
-                    <span>{copied ? 'Đã chép' : 'Sao chép'}</span>
+                    {copiedOrigin ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedOrigin ? 'Đã chép' : 'Sao chép'}</span>
                   </button>
                 </div>
                 <code className="block bg-slate-200 dark:bg-slate-800 p-1.5 rounded font-mono text-[10px] text-brand-600 dark:text-brand-400 overflow-x-auto">
