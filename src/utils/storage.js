@@ -142,100 +142,63 @@ export const getUserStorageKey = (email, dataType) => {
   return `focusflow_u_${safeEmail}_${dataType}_v2`;
 };
 
-// Retrieve registered user list with deep scanning across storage
-export const getRegisteredUsers = () => {
-  const userMap = new Map();
-
-  // Helper to add/merge a user object
-  const mergeUser = (u) => {
-    if (!u || !u.email) return;
-    const clean = normalizeEmail(u.email);
-    if (!clean || !clean.includes('@')) return;
-
-    const existing = userMap.get(clean);
-    if (!existing) {
-      // Only register account if it has valid identity metadata
-      userMap.set(clean, {
-        id: u.id || `usr-${Date.now()}-${Math.floor(Math.random()*1000)}`,
-        email: clean,
-        name: u.name || clean.split('@')[0],
-        password: u.password || '',
-        passwordHash: u.passwordHash || '',
-        avatar: u.avatar || u.picture || null,
-        createdAt: u.createdAt || new Date().toISOString(),
-        lastLogin: u.lastLogin || new Date().toISOString(),
-      });
-    } else {
-      // Merge best available properties (never wipe out an existing password)
-      if (!existing.password && u.password) existing.password = u.password;
-      if (!existing.passwordHash && u.passwordHash) existing.passwordHash = u.passwordHash;
-      if (!existing.name && u.name) existing.name = u.name;
-      if (!existing.avatar && (u.avatar || u.picture)) existing.avatar = u.avatar || u.picture;
-    }
-  };
-
-  // 1. Primary registered users list
-  const primaryUsers = getStoredData(STORAGE_KEYS.USERS, []);
-  if (Array.isArray(primaryUsers)) {
-    primaryUsers.forEach(mergeUser);
-  }
-
-  // 2. Scan historical keys in localStorage
-  const legacyKeys = [
-    'focusflow_registered_users_v2',
-    'focusflow_registered_users_v1',
-    'focusflow_users_v1',
-    'focusflow_users',
-    'focusflow_current_user_v2',
-    'focusflow_current_user_v1',
-    'focusflow_current_user',
-    'focusflow_user_profile_v1',
-    'focusflow_google_user_v1',
-    'focusflow_cloud_cached_users_v2',
-    'focusflow_cloud_cached_users_v1'
-  ];
-
-  legacyKeys.forEach(key => {
-    try {
-      const raw = localStorage.getItem(key);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          parsed.forEach(mergeUser);
-        } else if (parsed && typeof parsed === 'object' && parsed.email) {
-          mergeUser(parsed);
-        }
-      }
-    } catch (_) {}
-  });
-
-  // 3. Scan cloud cache keys for authenticated accounts
+// Auto-purge all previous accounts to ensure completely clean slate as requested
+const autoPurgeHistoricalAccounts = () => {
+  if (typeof window === 'undefined' || !window.localStorage) return;
   try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (!k) continue;
+    const PURGE_FLAG = 'focusflow_auto_purged_v3_clean';
+    if (!localStorage.getItem(PURGE_FLAG)) {
+      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      localStorage.removeItem(STORAGE_KEYS.USERS);
 
-      if (k.startsWith('cloud_cache_ff_user_') || k.startsWith('cloud_cache_ff_u_')) {
-        try {
-          const item = JSON.parse(localStorage.getItem(k));
-          if (item && item.email && (item.password || item.passwordHash)) {
-            mergeUser(item);
-          }
-        } catch (_) {}
+      const legacyKeys = [
+        'focusflow_registered_users_v2',
+        'focusflow_registered_users_v1',
+        'focusflow_users_v1',
+        'focusflow_users',
+        'focusflow_current_user_v2',
+        'focusflow_current_user_v1',
+        'focusflow_current_user',
+        'focusflow_user_profile_v1',
+        'focusflow_google_user_v1',
+        'focusflow_cloud_cached_users_v2',
+        'focusflow_cloud_cached_users_v1',
+        'focusflow_last_cloud_sync_time_v1',
+        'focusflow_cloud_last_sync_v2'
+      ];
+      legacyKeys.forEach(k => {
+        try { localStorage.removeItem(k); } catch (_) {}
+      });
+
+      const keysInStorage = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k) keysInStorage.push(k);
       }
+      keysInStorage.forEach(k => {
+        if (
+          k.startsWith('focusflow_u_') ||
+          k.startsWith('cloud_cache_') ||
+          k.startsWith('focusflow_google_')
+        ) {
+          try { localStorage.removeItem(k); } catch (_) {}
+        }
+      });
+
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify([]));
+      localStorage.setItem(PURGE_FLAG, 'true');
     }
   } catch (_) {}
+};
 
-  const mergedList = Array.from(userMap.values());
-  
-  // Persist merged list
-  if (mergedList.length > 0) {
-    try {
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(mergedList));
-    } catch (_) {}
-  }
+// Execute immediately upon load
+autoPurgeHistoricalAccounts();
 
-  return mergedList;
+// Retrieve registered user list
+export const getRegisteredUsers = () => {
+  const users = getStoredData(STORAGE_KEYS.USERS, []);
+  if (!Array.isArray(users)) return [];
+  return users.filter(u => u && u.email && u.email.includes('@'));
 };
 
 // Save registered user list

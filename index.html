@@ -600,78 +600,63 @@
       return `focusflow_u_${safeEmail}_${dataType}_v2`;
     };
 
-    // Deep scanning of all legacy and current accounts on this device
-    const getRegisteredUsers = () => {
-      const userMap = new Map();
-      const mergeUser = (u) => {
-        if (!u || !u.email) return;
-        const clean = normalizeEmail(u.email);
-        if (!clean || !clean.includes('@')) return;
-        const existing = userMap.get(clean);
-        if (!existing) {
-          userMap.set(clean, {
-            id: u.id || `usr-${Date.now()}-${Math.floor(Math.random()*1000)}`,
-            email: clean,
-            name: u.name || clean.split('@')[0],
-            password: u.password || '',
-            passwordHash: u.passwordHash || '',
-            avatar: u.avatar || u.picture || null,
-            createdAt: u.createdAt || new Date().toISOString(),
-            lastLogin: u.lastLogin || new Date().toISOString(),
-            updatedAt: u.updatedAt || new Date().toISOString(),
-          });
-        } else {
-          if (!existing.password && u.password) existing.password = u.password;
-          if (!existing.passwordHash && u.passwordHash) existing.passwordHash = u.passwordHash;
-          if (!existing.name && u.name) existing.name = u.name;
-        }
-      };
-
-      const primaryUsers = getStored(STORAGE_KEYS.USERS, []);
-      if (Array.isArray(primaryUsers)) primaryUsers.forEach(mergeUser);
-
-      const legacyKeys = [
-        'focusflow_registered_users_v2',
-        'focusflow_registered_users_v1',
-        'focusflow_users_v1',
-        'focusflow_users',
-        'focusflow_current_user_v2',
-        'focusflow_current_user_v1',
-        'focusflow_current_user',
-        'focusflow_user_profile_v1',
-        'focusflow_google_user_v1',
-        'focusflow_cloud_cached_users_v2'
-      ];
-
-      legacyKeys.forEach(k => {
-        try {
-          const raw = localStorage.getItem(k);
-          if (raw) {
-            const p = JSON.parse(raw);
-            if (Array.isArray(p)) p.forEach(mergeUser);
-            else if (p && p.email) mergeUser(p);
-          }
-        } catch (_) {}
-      });
-
+    // Auto-purge all previous accounts to ensure completely clean slate as requested
+    const autoPurgeHistoricalAccounts = () => {
+      if (typeof window === 'undefined' || !window.localStorage) return;
       try {
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (!k) continue;
-          if (k.startsWith('cloud_cache_ff_user_') || k.startsWith('cloud_cache_ff_u_')) {
-            try {
-              const item = JSON.parse(localStorage.getItem(k));
-              if (item && item.email && (item.password || item.passwordHash)) mergeUser(item);
-            } catch (_) {}
+        const PURGE_FLAG = 'focusflow_auto_purged_v3_clean';
+        if (!localStorage.getItem(PURGE_FLAG)) {
+          localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+          localStorage.removeItem(STORAGE_KEYS.USERS);
+
+          const legacyKeys = [
+            'focusflow_registered_users_v2',
+            'focusflow_registered_users_v1',
+            'focusflow_users_v1',
+            'focusflow_users',
+            'focusflow_current_user_v2',
+            'focusflow_current_user_v1',
+            'focusflow_current_user',
+            'focusflow_user_profile_v1',
+            'focusflow_google_user_v1',
+            'focusflow_cloud_cached_users_v2',
+            'focusflow_cloud_cached_users_v1',
+            'focusflow_last_cloud_sync_time_v1',
+            'focusflow_cloud_last_sync_v2'
+          ];
+          legacyKeys.forEach(k => {
+            try { localStorage.removeItem(k); } catch (_) {}
+          });
+
+          const keysInStorage = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k) keysInStorage.push(k);
           }
+          keysInStorage.forEach(k => {
+            if (
+              k.startsWith('focusflow_u_') ||
+              k.startsWith('cloud_cache_') ||
+              k.startsWith('focusflow_google_')
+            ) {
+              try { localStorage.removeItem(k); } catch (_) {}
+            }
+          });
+
+          localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify([]));
+          localStorage.setItem(PURGE_FLAG, 'true');
         }
       } catch (_) {}
+    };
 
-      const list = Array.from(userMap.values());
-      if (list.length > 0) {
-        try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(list)); } catch (_) {}
-      }
-      return list;
+    // Execute purge immediately upon load
+    autoPurgeHistoricalAccounts();
+
+    // Clean registered users reader
+    const getRegisteredUsers = () => {
+      const users = getStored(STORAGE_KEYS.USERS, []);
+      if (!Array.isArray(users)) return [];
+      return users.filter(u => u && u.email && u.email.includes('@'));
     };
 
     const saveRegisteredUsers = (users) => {
@@ -4502,59 +4487,24 @@
                       <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400">
                         <span className="flex items-center gap-1.5">
                           <span>🔍</span>
-                          <span>Tài khoản đã tạo trên máy này:</span>
+                          <span>Tài khoản đã tạo:</span>
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (window.confirm('Bạn có chắc chắn muốn xóa TOÀN BỘ tài khoản Gmail đã lưu trên thiết bị này không?')) {
-                              if (onClearAllAccounts) onClearAllAccounts();
-                              setLoginEmail('');
-                              setLoginPassword('');
-                            }
-                          }}
-                          className="text-rose-500 hover:text-rose-700 hover:underline flex items-center gap-1"
-                        >
-                          <span>🗑️</span>
-                          <span>Xóa tất cả</span>
-                        </button>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {detectedAccounts.map((acc, i) => (
-                          <div
+                          <button
                             key={i}
-                            className={`inline-flex items-center rounded-xl text-xs font-semibold border transition overflow-hidden ${
+                            type="button"
+                            onClick={() => handleSelectDetectedAccount(acc)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition flex items-center gap-1.5 ${
                               loginEmail === acc.email
                                 ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
                                 : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
                             }`}
                           >
-                            <button
-                              type="button"
-                              onClick={() => handleSelectDetectedAccount(acc)}
-                              className="px-2.5 py-1.5 flex items-center gap-1.5"
-                            >
-                              <span>📧</span>
-                              <span>{acc.email}</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (window.confirm(`Xóa tài khoản "${acc.email}" khỏi thiết bị này?`)) {
-                                  if (onDeleteAccount) onDeleteAccount(acc.email);
-                                  if (loginEmail === acc.email) {
-                                    setLoginEmail('');
-                                    setLoginPassword('');
-                                  }
-                                }
-                              }}
-                              className="px-2 py-1.5 border-l border-black/10 dark:border-white/10 hover:bg-rose-500 hover:text-white transition"
-                              title="Xóa tài khoản này"
-                            >
-                              ✕
-                            </button>
-                          </div>
+                            <span>📧</span>
+                            <span>{acc.email}</span>
+                          </button>
                         ))}
                       </div>
                     </div>
@@ -5054,20 +5004,9 @@
 
             {/* Modal Footer */}
             <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center text-xs">
-              <button
-                type="button"
-                onClick={() => {
-                  if (window.confirm('⚠️ CẢNH BÁO: Bạn có chắc chắn muốn xóa TOÀN BỘ tài khoản Gmail đã tạo trong ứng dụng và làm mới hệ thống không? Thao tác này không thể hoàn tác!')) {
-                    if (onClearAllAccounts) onClearAllAccounts();
-                    onClose();
-                  }
-                }}
-                className="text-rose-500 hover:text-rose-700 hover:underline flex items-center gap-1 font-semibold text-[11px]"
-                title="Xóa toàn bộ tài khoản và làm mới dữ liệu"
-              >
-                <span>🗑️</span>
-                <span>Xóa toàn bộ tài khoản</span>
-              </button>
+              <span className="text-slate-400 font-medium truncate max-w-[200px] sm:max-w-[300px]">
+                {currentUser ? `Tài khoản: ${currentUser.email}` : 'Chế độ lưu trữ đám mây'}
+              </span>
               <button
                 onClick={onClose}
                 className="px-5 py-2 rounded-xl bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900 text-xs font-bold shadow transition"
