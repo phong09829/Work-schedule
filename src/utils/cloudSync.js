@@ -192,13 +192,17 @@ export const getLegacyUserCloudKey = (email) => {
  */
 export const verifyPasswordRecord = async (enteredPassword, userRecord) => {
   if (!enteredPassword || !userRecord) return false;
+  // If userRecord doesn't have a valid password or hash, verification must fail
+  if (!userRecord.password && !userRecord.passwordHash) return false;
+
   const enteredPlain = enteredPassword.trim();
+  if (!enteredPlain) return false;
   const enteredHash = await hashPassword(enteredPlain);
   const text = `focusflow_secure_salt_2026:${enteredPlain}:focusflow_secure_salt_2026`;
   const enteredLegacyHash = legacyFallbackHash(text);
 
-  // 1. Plaintext direct match
-  if (userRecord.password && userRecord.password === enteredPlain) {
+  // 1. Plaintext direct match (must be non-empty)
+  if (userRecord.password && userRecord.password.trim() === enteredPlain) {
     return true;
   }
 
@@ -208,10 +212,10 @@ export const verifyPasswordRecord = async (enteredPassword, userRecord) => {
   }
 
   // 3. Stored password hashed matches
-  if (userRecord.password) {
-    const storedHashed = await hashPassword(userRecord.password);
+  if (userRecord.password && userRecord.password.trim()) {
+    const storedHashed = await hashPassword(userRecord.password.trim());
     if (storedHashed === enteredHash) return true;
-    if (userRecord.password === enteredHash) return true;
+    if (userRecord.password.trim() === enteredHash) return true;
   }
 
   // 4. Legacy custom hash match
@@ -469,10 +473,14 @@ export const registerCloudAccount = async ({ email, password, name, initialData 
   const passwordHash = await hashPassword(password);
   const enteredPlain = password.trim();
 
-  // Check if user already exists on Cloud or local list
-  const existingCloud = await loadFromCloudRemote(cloudKey, cleanEmail);
+  // Check if user already exists on Cloud or locally WITH A PASSWORD
+  let existingCloud = null;
+  try {
+    existingCloud = await loadFromCloudRemote(cloudKey, cleanEmail);
+  } catch (_) {}
+
   const existingLocal = findUserByEmail(cleanEmail);
-  const existing = existingCloud || existingLocal;
+  const existing = existingCloud || (existingLocal && (existingLocal.password || existingLocal.passwordHash) ? existingLocal : null);
 
   if (existing && (existing.password || existing.passwordHash)) {
     // If password matches, automatically log in and sync!
@@ -485,7 +493,7 @@ export const registerCloudAccount = async ({ email, password, name, initialData 
     return {
       ok: false,
       errorType: 'EMAIL_EXISTS',
-      message: `Tài khoản Gmail "${cleanEmail}" đã được tạo trước đó trên hệ thống! Vui lòng chuyển sang tab "Đăng Nhập" để vào tài khoản.`
+      message: `Tài khoản Gmail "${cleanEmail}" đã được tạo mật khẩu trước đó trên hệ thống! Vui lòng chuyển sang tab "Đăng Nhập" để nhập đúng mật khẩu hoặc chọn "Đặt lại mật khẩu".`
     };
   }
 
@@ -506,6 +514,7 @@ export const registerCloudAccount = async ({ email, password, name, initialData 
     name: displayName,
     password: enteredPlain,
     passwordHash: passwordHash,
+    passwordUpdatedAt: new Date().toISOString(),
     avatar: existingLocal?.avatar || null,
     createdAt: existingLocal?.createdAt || new Date().toISOString(),
     lastLogin: new Date().toISOString(),
@@ -513,8 +522,14 @@ export const registerCloudAccount = async ({ email, password, name, initialData 
     data: defaultDataset,
   };
 
-  // Push to Cloud & Local Cache
+  // Push to Cloud & Local Cache immediately
   await saveToCloudRemote(cloudKey, newUserRecord);
+
+  // Push to legacy cloud key for universal cross-device backward compatibility
+  const legacyKey = getLegacyUserCloudKey(cleanEmail);
+  if (legacyKey && legacyKey !== cloudKey) {
+    await saveToCloudRemote(legacyKey, newUserRecord);
+  }
 
   // Cache in local storage for instant offline access
   const sessionUser = {
@@ -539,42 +554,55 @@ export const registerCloudAccount = async ({ email, password, name, initialData 
     ok: true, 
     user: sessionUser, 
     data: newUserRecord.data,
-    message: `Đăng ký thành công! Tài khoản "${cleanEmail}" đã sẵn sàng hoạt động trên mọi thiết bị.` 
+    message: `Đăng ký thành công! Mật khẩu cho Gmail "${cleanEmail}" đã được đồng bộ trên cả máy tính & điện thoại.` 
   };
 };
 
 /**
  * Login User from Cloud on ANY Phone or Computer
- * 100% Deterministic cross-device verification and auto-repair
+ * 100% Deterministic cross-device verification and strict 1-password enforcement
  */
 export const loginCloudAccount = async ({ email, password }) => {
   const cleanEmail = normalizeEmail(email);
   if (!cleanEmail) {
     return { ok: false, message: 'Vui lòng nhập địa chỉ Gmail!' };
   }
-  if (!password) {
+  if (!password || !password.trim()) {
     return { ok: false, message: 'Vui lòng nhập mật khẩu tài khoản!' };
   }
 
   const cloudKey = await getUserCloudKey(cleanEmail);
-  const enteredHash = await hashPassword(password);
   const enteredPlain = password.trim();
+  const enteredHash = await hashPassword(enteredPlain);
 
   let userRecord = null;
 
-  // 1. Fetch latest record from Cloud Server (with multi-key resolution)
+  // 1. Fetch authoritative record from Cloud Server (Multi-device master source)
   try {
     userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
   } catch (err) {
-    console.warn('Cloud login load warning:', err);
+    console.warn('Cloud login fetch error:', err);
   }
 
-  // 2. Check Local Registered Users database
-  const registeredUsers = getRegisteredUsers();
-  const localUser = registeredUsers.find(u => normalizeEmail(u.email) === cleanEmail);
+  // 2. If Cloud fetch returned null (e.g. offline), check local verified cloud cache
+  if (!userRecord || (!userRecord.password && !userRecord.passwordHash)) {
+    try {
+      const cachedRaw = localStorage.getItem(`cloud_cache_${cloudKey}`);
+      if (cachedRaw) {
+        const parsed = JSON.parse(cachedRaw);
+        if (parsed && (parsed.password || parsed.passwordHash)) {
+          userRecord = parsed;
+        }
+      }
+    } catch (_) {}
+  }
 
-  if (localUser) {
-    if (!userRecord) {
+  // 3. Check registered users database ONLY if user has a verified password set
+  if (!userRecord || (!userRecord.password && !userRecord.passwordHash)) {
+    const registeredUsers = getRegisteredUsers();
+    const localUser = registeredUsers.find(u => normalizeEmail(u.email) === cleanEmail && (u.password || u.passwordHash));
+
+    if (localUser) {
       userRecord = {
         id: localUser.id || `usr-${Date.now()}`,
         email: cleanEmail,
@@ -591,65 +619,33 @@ export const loginCloudAccount = async ({ email, password }) => {
           settings: getStoredData(getUserStorageKey(cleanEmail, 'settings'), DEFAULT_SETTINGS),
         }
       };
-    } else {
-      // Sync local passwords if available
-      if (!userRecord.password && localUser.password) userRecord.password = localUser.password;
-      if (!userRecord.passwordHash && localUser.passwordHash) userRecord.passwordHash = localUser.passwordHash;
     }
   }
 
-  // 3. If still no user found, check if there are orphan user tasks/events saved on this browser
-  if (!userRecord) {
-    const orphanTasks = getStoredData(getUserStorageKey(cleanEmail, 'tasks'), null);
-    const orphanEvents = getStoredData(getUserStorageKey(cleanEmail, 'events'), null);
-    
-    if (orphanTasks || orphanEvents) {
-      // Found data created previously with this email! Auto-create account with the entered password.
-      return registerCloudAccount({
-        email: cleanEmail,
-        password: enteredPlain,
-        name: cleanEmail.split('@')[0],
-        initialData: {
-          tasks: orphanTasks || DEFAULT_TASKS,
-          events: orphanEvents || DEFAULT_CALENDAR_EVENTS,
-          pomoSessions: getStoredData(getUserStorageKey(cleanEmail, 'pomo_sessions'), generateInitialPomoSessions()),
-          settings: getStoredData(getUserStorageKey(cleanEmail, 'settings'), DEFAULT_SETTINGS),
-        }
-      });
-    }
-  }
-
-  if (!userRecord) {
+  // If no account with a password exists anywhere on Cloud or Local cache
+  if (!userRecord || (!userRecord.password && !userRecord.passwordHash)) {
     return {
       ok: false,
       errorType: 'USER_NOT_FOUND',
-      message: `Tài khoản Gmail "${cleanEmail}" chưa được tìm thấy trên thiết bị này. Vui lòng chọn tab "Đăng Ký Mới" để tạo mật khẩu hoặc kiểm tra lại địa chỉ Gmail!`
+      message: `Tài khoản Gmail "${cleanEmail}" chưa được đăng ký mật khẩu trên hệ thống. Vui lòng chuyển sang tab "Đăng Ký Mới" để tạo mật khẩu hoặc kiểm tra lại địa chỉ Gmail!`
     };
   }
 
-  // 4. Verify Password
-  // Case A: User previously had NO password set (e.g. from Google direct login) -> automatically adopt this password
-  if (!userRecord.password && !userRecord.passwordHash) {
-    userRecord.password = enteredPlain;
-    userRecord.passwordHash = enteredHash;
-    await saveToCloudRemote(cloudKey, userRecord);
-  } else {
-    // Case B: Verify password matching across plaintext, SHA-256, and legacy hashes
-    const isMatch = await verifyPasswordRecord(enteredPlain, userRecord);
+  // 4. Strict Password Verification across SHA-256 and legacy hashes
+  const isMatch = await verifyPasswordRecord(enteredPlain, userRecord);
 
-    if (!isMatch) {
-      return {
-        ok: false,
-        errorType: 'WRONG_PASSWORD',
-        canReset: true,
-        message: 'Mật khẩu không chính xác! Bạn có thể bấm vào "Đặt lại mật khẩu" bên dưới để tạo lại mật khẩu mới cho Gmail này.'
-      };
-    }
+  if (!isMatch) {
+    return {
+      ok: false,
+      errorType: 'WRONG_PASSWORD',
+      canReset: true,
+      message: 'Mật khẩu không chính xác! Mỗi tài khoản Gmail chỉ có DUY NHẤT 1 mật khẩu cho cả máy tính và điện thoại. Nếu bạn đã đổi mật khẩu, vui lòng nhập mật khẩu mới nhất hoặc chọn "Đặt lại mật khẩu" bên dưới.'
+    };
   }
 
-  // 5. Auto-repair & update record with standardized SHA-256 hash and latest login timestamp
+  // 5. Password valid! Auto-upgrade record with SHA-256 standard and push to Cloud
   userRecord.lastLogin = new Date().toISOString();
-  userRecord.password = enteredPlain; // Keep active for zero-latency multi-device sync
+  userRecord.password = enteredPlain;
   userRecord.passwordHash = enteredHash;
   await saveToCloudRemote(cloudKey, userRecord);
 
@@ -700,21 +696,16 @@ export const resetCloudAccountPassword = async ({ email, newPassword }) => {
   }
 
   const cloudKey = await getUserCloudKey(cleanEmail);
-  const newHash = await hashPassword(newPassword);
   const enteredPlain = newPassword.trim();
+  const newHash = await hashPassword(enteredPlain);
 
-  let userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
+  let userRecord = null;
+  try {
+    userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
+  } catch (_) {}
+
   const registeredUsers = getRegisteredUsers();
   const localUser = registeredUsers.find(u => normalizeEmail(u.email) === cleanEmail);
-
-  if (!userRecord && !localUser) {
-    // If not found, create new account directly
-    return registerCloudAccount({
-      email: cleanEmail,
-      password: enteredPlain,
-      name: cleanEmail.split('@')[0],
-    });
-  }
 
   const existingData = userRecord?.data || {
     tasks: getStoredData(getUserStorageKey(cleanEmail, 'tasks'), DEFAULT_TASKS),
@@ -730,12 +721,13 @@ export const resetCloudAccountPassword = async ({ email, newPassword }) => {
     name: userRecord?.name || localUser?.name || cleanEmail.split('@')[0],
     password: enteredPlain,
     passwordHash: newHash,
+    passwordUpdatedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     lastLogin: new Date().toISOString(),
     data: existingData,
   };
 
-  // 1. Push updated record to Cloud
+  // 1. Push updated record to Cloud immediately with urgent priority
   await saveToCloudRemote(cloudKey, updatedRecord);
 
   // 2. Also push to legacy cloud key if applicable
@@ -763,7 +755,7 @@ export const resetCloudAccountPassword = async ({ email, newPassword }) => {
     ok: true,
     user: sessionUser,
     data: updatedRecord.data,
-    message: `Đã cập nhật mật khẩu mới cho tài khoản "${cleanEmail}" thành công! Bạn có thể đăng nhập trên điện thoại và máy tính ngay lập tức.`
+    message: `Đã cập nhật mật khẩu mới cho tài khoản "${cleanEmail}" thành công! Từ bây giờ, tất cả thiết bị (máy tính, điện thoại) đều phải đăng nhập bằng mật khẩu mới này.`
   };
 };
 
@@ -776,16 +768,24 @@ export const changeCloudPassword = async ({ email, oldPassword, newPassword }) =
   if (!cleanEmail) return { ok: false, message: 'Chưa xác định tài khoản!' };
 
   const cloudKey = await getUserCloudKey(cleanEmail);
-  let userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
-  const localUser = findUserByEmail(cleanEmail);
-  const activeUser = userRecord || localUser;
+  let userRecord = null;
+  try {
+    userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
+  } catch (_) {}
 
-  if (!activeUser) {
-    return { ok: false, message: 'Không tìm thấy thông tin tài khoản!' };
+  if (!userRecord) {
+    const localUser = findUserByEmail(cleanEmail);
+    if (localUser && (localUser.password || localUser.passwordHash)) {
+      userRecord = localUser;
+    }
   }
 
-  // Verify old password
-  const isOldValid = await verifyPasswordRecord(oldPassword, activeUser);
+  if (!userRecord) {
+    return { ok: false, message: 'Không tìm thấy thông tin tài khoản trên hệ thống!' };
+  }
+
+  // Verify old password strictly
+  const isOldValid = await verifyPasswordRecord(oldPassword, userRecord);
   if (!isOldValid) {
     return { ok: false, message: 'Mật khẩu hiện tại không chính xác! Vui lòng kiểm tra lại.' };
   }

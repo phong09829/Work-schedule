@@ -142,7 +142,7 @@ export const getUserStorageKey = (email, dataType) => {
   return `focusflow_u_${safeEmail}_${dataType}_v2`;
 };
 
-// Retrieve registered user list with deep legacy scanning across all historical versions
+// Retrieve registered user list with deep scanning across storage
 export const getRegisteredUsers = () => {
   const userMap = new Map();
 
@@ -154,6 +154,7 @@ export const getRegisteredUsers = () => {
 
     const existing = userMap.get(clean);
     if (!existing) {
+      // Only register account if it has valid identity metadata
       userMap.set(clean, {
         id: u.id || `usr-${Date.now()}-${Math.floor(Math.random()*1000)}`,
         email: clean,
@@ -165,7 +166,7 @@ export const getRegisteredUsers = () => {
         lastLogin: u.lastLogin || new Date().toISOString(),
       });
     } else {
-      // Merge best available properties
+      // Merge best available properties (never wipe out an existing password)
       if (!existing.password && u.password) existing.password = u.password;
       if (!existing.passwordHash && u.passwordHash) existing.passwordHash = u.passwordHash;
       if (!existing.name && u.name) existing.name = u.name;
@@ -208,26 +209,18 @@ export const getRegisteredUsers = () => {
     } catch (_) {}
   });
 
-  // 3. Scan all localStorage keys for user namespaces (e.g. focusflow_u_xxx_tasks_v2 or cloud_cache_ff_user_xxx)
+  // 3. Scan cloud cache keys for authenticated accounts
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       if (!k) continue;
-      
-      // Match focusflow_u_<email>_*
-      if (k.startsWith('focusflow_u_') && k.includes('@')) {
-        const parts = k.replace('focusflow_u_', '').split('_');
-        const candidateEmail = parts[0];
-        if (candidateEmail && candidateEmail.includes('@')) {
-          mergeUser({ email: candidateEmail });
-        }
-      }
 
-      // Match cloud_cache_ff_user_*
-      if (k.startsWith('cloud_cache_ff_user_')) {
+      if (k.startsWith('cloud_cache_ff_user_') || k.startsWith('cloud_cache_ff_u_')) {
         try {
           const item = JSON.parse(localStorage.getItem(k));
-          if (item && item.email) mergeUser(item);
+          if (item && item.email && (item.password || item.passwordHash)) {
+            mergeUser(item);
+          }
         } catch (_) {}
       }
     }
@@ -338,24 +331,19 @@ export const loginUserAccount = ({ email, password }) => {
   }
 
   const user = findUserByEmail(cleanEmail);
-  if (!user) {
+  if (!user || (!user.password && !user.passwordHash)) {
     return { 
       ok: false, 
       errorType: 'USER_NOT_FOUND',
-      message: `Tài khoản Gmail "${cleanEmail}" chưa tồn tại trên hệ thống. Vui lòng chọn tab "Đăng Ký Tài Khoản" để tạo mật khẩu!` 
+      message: `Tài khoản Gmail "${cleanEmail}" chưa được đăng ký mật khẩu trên thiết bị này. Vui lòng chuyển sang tab "Đăng Ký Mới"!` 
     };
   }
 
-  // If user previously had no password (e.g. from Google direct login), allow setting this password now
-  if (!user.password && !user.passwordHash) {
-    user.password = password.trim();
-    const users = getRegisteredUsers().map(u => normalizeEmail(u.email) === cleanEmail ? { ...u, password: password.trim() } : u);
-    saveRegisteredUsers(users);
-  } else if (user.password && user.password !== password?.trim()) {
+  if (user.password && user.password !== password?.trim()) {
     return { 
       ok: false, 
       errorType: 'WRONG_PASSWORD',
-      message: 'Mật khẩu không chính xác! Bạn có thể chọn "Đặt lại mật khẩu" nếu quên mật khẩu.' 
+      message: 'Mật khẩu không chính xác! Mỗi tài khoản Gmail chỉ có duy nhất 1 mật khẩu trên mọi thiết bị. Vui lòng kiểm tra lại.' 
     };
   }
 

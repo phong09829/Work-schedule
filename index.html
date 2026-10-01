@@ -547,17 +547,20 @@
 
     const verifyPasswordRecord = async (enteredPassword, userRecord) => {
       if (!enteredPassword || !userRecord) return false;
+      if (!userRecord.password && !userRecord.passwordHash) return false;
+
       const enteredPlain = enteredPassword.trim();
+      if (!enteredPlain) return false;
       const enteredHash = await hashPassword(enteredPlain);
       const text = `focusflow_secure_salt_2026:${enteredPlain}:focusflow_secure_salt_2026`;
       const enteredLegacyHash = legacyFallbackHash(text);
 
-      if (userRecord.password && userRecord.password === enteredPlain) return true;
+      if (userRecord.password && userRecord.password.trim() === enteredPlain) return true;
       if (userRecord.passwordHash && userRecord.passwordHash === enteredHash) return true;
-      if (userRecord.password) {
-        const storedHashed = await hashPassword(userRecord.password);
+      if (userRecord.password && userRecord.password.trim()) {
+        const storedHashed = await hashPassword(userRecord.password.trim());
         if (storedHashed === enteredHash) return true;
-        if (userRecord.password === enteredHash) return true;
+        if (userRecord.password.trim() === enteredHash) return true;
       }
       if (userRecord.passwordHash && userRecord.passwordHash === enteredLegacyHash) return true;
 
@@ -635,14 +638,10 @@
         for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i);
           if (!k) continue;
-          if (k.startsWith('focusflow_u_') && k.includes('@')) {
-            const candidateEmail = k.replace('focusflow_u_', '').split('_')[0];
-            if (candidateEmail && candidateEmail.includes('@')) mergeUser({ email: candidateEmail });
-          }
           if (k.startsWith('cloud_cache_ff_user_') || k.startsWith('cloud_cache_ff_u_')) {
             try {
               const item = JSON.parse(localStorage.getItem(k));
-              if (item && item.email) mergeUser(item);
+              if (item && item.email && (item.password || item.passwordHash)) mergeUser(item);
             } catch (_) {}
           }
         }
@@ -898,9 +897,13 @@
       const passwordHash = await hashPassword(password);
       const enteredPlain = password.trim();
 
-      const existingCloud = await loadFromCloudRemote(cloudKey, cleanEmail);
+      let existingCloud = null;
+      try {
+        existingCloud = await loadFromCloudRemote(cloudKey, cleanEmail);
+      } catch (_) {}
+
       const existingLocal = findUserByEmail(cleanEmail);
-      const existing = existingCloud || existingLocal;
+      const existing = existingCloud || (existingLocal && (existingLocal.password || existingLocal.passwordHash) ? existingLocal : null);
 
       if (existing && (existing.password || existing.passwordHash)) {
         const isMatch = await verifyPasswordRecord(enteredPlain, existing);
@@ -912,7 +915,7 @@
         return {
           ok: false,
           errorType: 'EMAIL_EXISTS',
-          message: `Tài khoản Gmail "${cleanEmail}" đã được tạo trước đó trên hệ thống! Vui lòng chuyển sang tab "Đăng Nhập" để vào tài khoản.`
+          message: `Tài khoản Gmail "${cleanEmail}" đã được tạo mật khẩu trước đó trên hệ thống! Vui lòng chuyển sang tab "Đăng Nhập" để nhập đúng mật khẩu hoặc chọn "Đặt lại mật khẩu".`
         };
       }
 
@@ -933,6 +936,7 @@
         name: displayName,
         password: enteredPlain,
         passwordHash: passwordHash,
+        passwordUpdatedAt: new Date().toISOString(),
         avatar: existing?.avatar || null,
         createdAt: existing?.createdAt || new Date().toISOString(),
         lastLogin: new Date().toISOString(),
@@ -941,6 +945,10 @@
       };
 
       await saveToCloudRemote(cloudKey, newUserRecord);
+      const legacyKey = getLegacyUserCloudKey(cleanEmail);
+      if (legacyKey && legacyKey !== cloudKey) {
+        await saveToCloudRemote(legacyKey, newUserRecord);
+      }
 
       const sessionUser = {
         id: newUserRecord.id,
@@ -963,24 +971,43 @@
         ok: true, 
         user: sessionUser, 
         data: newUserRecord.data,
-        message: `Đăng ký thành công! Tài khoản "${cleanEmail}" đã sẵn sàng.` 
+        message: `Đăng ký thành công! Mật khẩu cho Gmail "${cleanEmail}" đã được kích hoạt đồng bộ trên cả máy tính & điện thoại.` 
       };
     };
 
     const loginCloudAccount = async ({ email, password }) => {
       const cleanEmail = normalizeEmail(email);
       if (!cleanEmail) return { ok: false, message: 'Vui lòng nhập địa chỉ Gmail!' };
-      if (!password) return { ok: false, message: 'Vui lòng nhập mật khẩu!' };
+      if (!password || !password.trim()) return { ok: false, message: 'Vui lòng nhập mật khẩu tài khoản!' };
 
       const cloudKey = await getUserCloudKey(cleanEmail);
-      const enteredHash = await hashPassword(password);
       const enteredPlain = password.trim();
+      const enteredHash = await hashPassword(enteredPlain);
 
-      let userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
-      const localUser = findUserByEmail(cleanEmail);
+      let userRecord = null;
+      try {
+        userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
+      } catch (err) {
+        console.warn('Cloud login fetch error:', err);
+      }
 
-      if (localUser) {
-        if (!userRecord) {
+      if (!userRecord || (!userRecord.password && !userRecord.passwordHash)) {
+        try {
+          const cachedRaw = localStorage.getItem(`cloud_cache_${cloudKey}`);
+          if (cachedRaw) {
+            const parsed = JSON.parse(cachedRaw);
+            if (parsed && (parsed.password || parsed.passwordHash)) {
+              userRecord = parsed;
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (!userRecord || (!userRecord.password && !userRecord.passwordHash)) {
+        const registeredUsers = getRegisteredUsers();
+        const localUser = registeredUsers.find(u => normalizeEmail(u.email) === cleanEmail && (u.password || u.passwordHash));
+
+        if (localUser) {
           userRecord = {
             id: localUser.id || `usr-${Date.now()}`,
             email: cleanEmail,
@@ -997,53 +1024,26 @@
               settings: getUserData(cleanEmail, 'settings', DEFAULT_SETTINGS),
             }
           };
-        } else {
-          if (!userRecord.password && localUser.password) userRecord.password = localUser.password;
-          if (!userRecord.passwordHash && localUser.passwordHash) userRecord.passwordHash = localUser.passwordHash;
         }
       }
 
-      if (!userRecord) {
-        const orphanTasks = getUserData(cleanEmail, 'tasks', null);
-        const orphanEvents = getUserData(cleanEmail, 'events', null);
-        if (orphanTasks || orphanEvents) {
-          return registerCloudAccount({
-            email: cleanEmail,
-            password: enteredPlain,
-            name: cleanEmail.split('@')[0],
-            initialData: {
-              tasks: orphanTasks || DEFAULT_TASKS,
-              events: orphanEvents || DEFAULT_EVENTS,
-              pomoSessions: getUserData(cleanEmail, 'pomo_sessions', generateInitialPomoSessions()),
-              settings: getUserData(cleanEmail, 'settings', DEFAULT_SETTINGS),
-            }
-          });
-        }
-      }
-
-      if (!userRecord) {
+      if (!userRecord || (!userRecord.password && !userRecord.passwordHash)) {
         return {
           ok: false,
           errorType: 'USER_NOT_FOUND',
-          message: `Tài khoản Gmail "${cleanEmail}" chưa được tìm thấy trên thiết bị này. Bạn có thể bấm "Đăng Ký Mới" hoặc "Đặt lại mật khẩu".`
+          message: `Tài khoản Gmail "${cleanEmail}" chưa được đăng ký mật khẩu trên hệ thống. Vui lòng chuyển sang tab "Đăng Ký Mới" để tạo mật khẩu!`
         };
       }
 
-      if (!userRecord.password && !userRecord.passwordHash) {
-        userRecord.password = enteredPlain;
-        userRecord.passwordHash = enteredHash;
-        await saveToCloudRemote(cloudKey, userRecord);
-      } else {
-        const isMatch = await verifyPasswordRecord(enteredPlain, userRecord);
+      const isMatch = await verifyPasswordRecord(enteredPlain, userRecord);
 
-        if (!isMatch) {
-          return {
-            ok: false,
-            errorType: 'WRONG_PASSWORD',
-            canReset: true,
-            message: 'Mật khẩu không chính xác! Bạn có thể chọn "Đặt lại mật khẩu" bên dưới để tạo lại mật khẩu mới.'
-          };
-        }
+      if (!isMatch) {
+        return {
+          ok: false,
+          errorType: 'WRONG_PASSWORD',
+          canReset: true,
+          message: 'Mật khẩu không chính xác! Mỗi tài khoản Gmail chỉ có DUY NHẤT 1 mật khẩu cho cả máy tính và điện thoại. Nếu bạn đã đổi mật khẩu, vui lòng nhập mật khẩu mới nhất hoặc chọn "Đặt lại mật khẩu" bên dưới.'
+        };
       }
 
       userRecord.lastLogin = new Date().toISOString();
@@ -1093,19 +1093,16 @@
       }
 
       const cloudKey = await getUserCloudKey(cleanEmail);
-      const newHash = await hashPassword(newPassword);
       const enteredPlain = newPassword.trim();
-      let userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
+      const newHash = await hashPassword(enteredPlain);
+
+      let userRecord = null;
+      try {
+        userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
+      } catch (_) {}
+
       const registeredUsers = getRegisteredUsers();
       const localUser = registeredUsers.find(u => normalizeEmail(u.email) === cleanEmail);
-
-      if (!userRecord && !localUser) {
-        return registerCloudAccount({
-          email: cleanEmail,
-          password: enteredPlain,
-          name: cleanEmail.split('@')[0],
-        });
-      }
 
       const existingData = userRecord?.data || {
         tasks: getUserData(cleanEmail, 'tasks', DEFAULT_TASKS),
@@ -1121,6 +1118,7 @@
         name: userRecord?.name || localUser?.name || cleanEmail.split('@')[0],
         password: enteredPlain,
         passwordHash: newHash,
+        passwordUpdatedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         lastLogin: new Date().toISOString(),
         data: existingData,
@@ -1151,7 +1149,7 @@
         ok: true,
         user: sessionUser,
         data: updatedRecord.data,
-        message: `Đã đặt lại mật khẩu cho tài khoản "${cleanEmail}" thành công!`
+        message: `Đã cập nhật mật khẩu mới cho tài khoản "${cleanEmail}" thành công! Từ bây giờ, tất cả thiết bị (máy tính, điện thoại) đều phải đăng nhập bằng mật khẩu mới này.`
       };
     };
 
@@ -1160,18 +1158,31 @@
       if (!cleanEmail) return { ok: false, message: 'Chưa xác định tài khoản!' };
 
       const cloudKey = await getUserCloudKey(cleanEmail);
-      const userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
-      const localUser = findUserByEmail(cleanEmail);
-      const activeUser = userRecord || localUser;
+      let userRecord = null;
+      try {
+        userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
+      } catch (_) {}
 
-      if (!activeUser) {
-        return { ok: false, message: 'Không tìm thấy thông tin tài khoản!' };
+      if (!userRecord) {
+        const localUser = findUserByEmail(cleanEmail);
+        if (localUser && (localUser.password || localUser.passwordHash)) {
+          userRecord = localUser;
+        }
       }
 
-      const isOldValid = await verifyPasswordRecord(oldPassword, activeUser);
+      if (!userRecord) {
+        return { ok: false, message: 'Không tìm thấy thông tin tài khoản trên hệ thống!' };
+      }
+
+      const isOldValid = await verifyPasswordRecord(oldPassword, userRecord);
       if (!isOldValid) {
-        return { ok: false, message: 'Mật khẩu hiện tại không chính xác!' };
+        return { ok: false, message: 'Mật khẩu hiện tại không chính xác! Vui lòng kiểm tra lại.' };
       }
+
+      if (!newPassword || newPassword.trim().length < 4) {
+        return { ok: false, message: 'Mật khẩu mới phải có ít nhất 4 ký tự!' };
+      }
+
       return resetCloudAccountPassword({ email: cleanEmail, newPassword });
     };
 
