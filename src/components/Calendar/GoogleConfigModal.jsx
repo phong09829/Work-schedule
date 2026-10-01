@@ -23,7 +23,9 @@ import {
   Download, 
   RotateCcw, 
   FileJson,
-  Laptop
+  Laptop,
+  Smartphone,
+  Link as LinkIcon
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { exportFullBackup } from '../../utils/cloudSync';
@@ -42,6 +44,9 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     lastCloudSyncTime,
     syncWithCloud,
     getAllLocalAccounts,
+    quickSyncToken,
+    phoneLoginLink,
+    importQuickSync,
     events,
     tasks,
     pomoSessions,
@@ -851,6 +856,50 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                   </button>
                 </div>
               </form>
+
+              {/* 1-Click Phone Link & Cross-Device Pairing */}
+              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-brand-50/80 to-purple-50/80 dark:from-brand-950/40 dark:to-purple-950/40 border border-brand-200/80 dark:border-brand-900/50 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-brand-800 dark:text-brand-300 flex items-center gap-1.5">
+                    <Smartphone className="w-4 h-4 text-brand-500" />
+                    <span>Đồng Bộ Sang Điện Thoại (1-Chạm Không Cần Gõ MK)</span>
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-600 border border-brand-500/20">
+                    Auto-Link
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                  Sao chép liên kết hoặc gửi link này sang điện thoại (Zalo / Tin nhắn / Email) để điện thoại tự động đăng nhập và tải toàn bộ dữ liệu tức thì.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (phoneLoginLink) {
+                        navigator.clipboard.writeText(phoneLoginLink);
+                        showToast('Đã sao chép liên kết 1-chạm sang điện thoại!', 'success');
+                      }
+                    }}
+                    className="flex-1 py-2 px-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+                  >
+                    <LinkIcon className="w-3.5 h-3.5" />
+                    <span>Sao Chép Link Điện Thoại</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (quickSyncToken) {
+                        navigator.clipboard.writeText(quickSyncToken);
+                        showToast('Đã sao chép mã đồng bộ tài khoản!', 'info');
+                      }
+                    }}
+                    className="py-2 px-3 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 text-slate-700 dark:text-slate-300 text-xs font-bold flex items-center gap-1 transition"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Mã Token</span>
+                  </button>
+                </div>
+              </div>
 
               {/* Offline Backup Export */}
               <div className="p-3.5 rounded-2xl bg-slate-100/70 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 flex items-center justify-between">

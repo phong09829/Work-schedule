@@ -412,6 +412,112 @@
       return email.trim().toLowerCase();
     };
 
+    // 100% Deterministic Pure JavaScript SHA-256 implementation
+    const sha256Pure = (ascii) => {
+      if (!ascii) return '';
+      function rightRotate(value, amount) {
+        return (value >>> amount) | (value << (32 - amount));
+      }
+
+      const k = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+      ];
+
+      let hash = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+      ];
+
+      const utf8 = unescape(encodeURIComponent(ascii));
+      const utf8BitLength = utf8.length * 8;
+      const words = [];
+
+      for (let i = 0; i < utf8.length; i++) {
+        words[i >> 2] |= (utf8.charCodeAt(i) & 0xff) << ((3 - (i % 4)) * 8);
+      }
+
+      words[utf8BitLength >> 5] |= 0x80 << (24 - (utf8BitLength % 32));
+      words[(((utf8BitLength + 64) >> 9) << 4) + 15] = utf8BitLength;
+
+      const w = new Array(64);
+
+      for (let i = 0; i < words.length; i += 16) {
+        let a = hash[0];
+        let b = hash[1];
+        let c = hash[2];
+        let d = hash[3];
+        let e = hash[4];
+        let f = hash[5];
+        let g = hash[6];
+        let h = hash[7];
+
+        for (let j = 0; j < 64; j++) {
+          if (j < 16) {
+            w[j] = words[i + j] | 0;
+          } else {
+            const gamma0 = rightRotate(w[j - 15], 7) ^ rightRotate(w[j - 15], 18) ^ (w[j - 15] >>> 3);
+            const gamma1 = rightRotate(w[j - 2], 17) ^ rightRotate(w[j - 2], 19) ^ (w[j - 2] >>> 10);
+            w[j] = (w[j - 16] + gamma0 + w[j - 7] + gamma1) | 0;
+          }
+
+          const s1 = rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25);
+          const ch = (e & f) ^ (~e & g);
+          const temp1 = (h + s1 + ch + k[j] + w[j]) | 0;
+          const s0 = rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22);
+          const maj = (a & b) ^ (a & c) ^ (b & c);
+          const temp2 = (s0 + maj) | 0;
+
+          h = g;
+          g = f;
+          f = e;
+          e = (d + temp1) | 0;
+          d = c;
+          c = b;
+          b = a;
+          a = (temp1 + temp2) | 0;
+        }
+
+        hash[0] = (hash[0] + a) | 0;
+        hash[1] = (hash[1] + b) | 0;
+        hash[2] = (hash[2] + c) | 0;
+        hash[3] = (hash[3] + d) | 0;
+        hash[4] = (hash[4] + e) | 0;
+        hash[5] = (hash[5] + f) | 0;
+        hash[6] = (hash[6] + g) | 0;
+        hash[7] = (hash[7] + h) | 0;
+      }
+
+      let result = '';
+      for (let i = 0; i < 8; i++) {
+        for (let j = 3; j >= 0; j--) {
+          const b = (hash[i] >> (j * 8)) & 255;
+          result += (b < 16 ? '0' : '') + b.toString(16);
+        }
+      }
+      return result;
+    };
+
+    const legacyFallbackHash = (text) => {
+      if (!text) return '';
+      let h1 = 0xdeadbeef ^ text.length;
+      let h2 = 0x41c6ce57 ^ text.length;
+      for (let i = 0; i < text.length; i++) {
+        const ch = text.charCodeAt(i);
+        h1 = Math.imul(h1 ^ ch, 2654435761);
+        h2 = Math.imul(h2 ^ ch, 1597334677);
+      }
+      h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+      h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+      return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16) + 'abc12345';
+    };
+
     const hashPassword = async (password, salt = 'focusflow_secure_salt_2026') => {
       if (!password) return '';
       const text = `${salt}:${password.trim()}:${salt}`;
@@ -421,23 +527,49 @@
           const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgBuffer);
           const hashArray = Array.from(new Uint8Array(hashBuffer));
           return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        } catch (e) {}
+        } catch (_) {}
       }
-      let h1 = 0xdeadbeef ^ text.length;
-      let h2 = 0x41c6ce57 ^ text.length;
-      for (let i = 0; i < text.length; i++) {
-        const ch = text.charCodeAt(i);
-        h1 = Math.imul(h1 ^ ch, 2654435761);
-        h2 = Math.imul(h2 ^ ch, 1597334677);
-      }
-      return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16) + 'abc12345';
+      return sha256Pure(text);
     };
 
     const getUserCloudKey = async (email) => {
       const clean = normalizeEmail(email);
-      const hash = await hashPassword(clean, 'user_id_salt');
-      return `ff_user_${hash.slice(0, 24)}`;
+      const hash = sha256Pure(`user_cloud_ns:${clean}`);
+      return `ff_u_${hash.slice(0, 24)}`;
     };
+
+    const getLegacyUserCloudKey = (email) => {
+      const clean = normalizeEmail(email);
+      const text = `user_id_salt:${clean}:user_id_salt`;
+      const leg = legacyFallbackHash(text);
+      return `ff_user_${leg.slice(0, 24)}`;
+    };
+
+    const verifyPasswordRecord = async (enteredPassword, userRecord) => {
+      if (!enteredPassword || !userRecord) return false;
+      const enteredPlain = enteredPassword.trim();
+      const enteredHash = await hashPassword(enteredPlain);
+      const text = `focusflow_secure_salt_2026:${enteredPlain}:focusflow_secure_salt_2026`;
+      const enteredLegacyHash = legacyFallbackHash(text);
+
+      if (userRecord.password && userRecord.password === enteredPlain) return true;
+      if (userRecord.passwordHash && userRecord.passwordHash === enteredHash) return true;
+      if (userRecord.password) {
+        const storedHashed = await hashPassword(userRecord.password);
+        if (storedHashed === enteredHash) return true;
+        if (userRecord.password === enteredHash) return true;
+      }
+      if (userRecord.passwordHash && userRecord.passwordHash === enteredLegacyHash) return true;
+
+      return false;
+    };
+
+    let broadcastChan = null;
+    try {
+      if (typeof window !== 'undefined' && window.BroadcastChannel) {
+        broadcastChan = new BroadcastChannel('focusflow_global_sync_channel');
+      }
+    } catch (_) {}
 
     const getUserStorageKey = (email, dataType) => {
       const cleanEmail = normalizeEmail(email) || 'guest';
@@ -463,6 +595,7 @@
             avatar: u.avatar || u.picture || null,
             createdAt: u.createdAt || new Date().toISOString(),
             lastLogin: u.lastLogin || new Date().toISOString(),
+            updatedAt: u.updatedAt || new Date().toISOString(),
           });
         } else {
           if (!existing.password && u.password) existing.password = u.password;
@@ -506,7 +639,7 @@
             const candidateEmail = k.replace('focusflow_u_', '').split('_')[0];
             if (candidateEmail && candidateEmail.includes('@')) mergeUser({ email: candidateEmail });
           }
-          if (k.startsWith('cloud_cache_ff_user_')) {
+          if (k.startsWith('cloud_cache_ff_user_') || k.startsWith('cloud_cache_ff_u_')) {
             try {
               const item = JSON.parse(localStorage.getItem(k));
               if (item && item.email) mergeUser(item);
@@ -579,13 +712,21 @@
           avatar: data.avatar || null,
           createdAt: data.createdAt || new Date().toISOString(),
           lastLogin: new Date().toISOString(),
+          updatedAt: data.updatedAt || new Date().toISOString(),
         };
         if (existingIdx >= 0) users[existingIdx] = { ...users[existingIdx], ...summary };
         else users.push(summary);
         saveRegisteredUsers(users);
       }
 
-      // 3. Global Cloud Relay Push (Multi-Device Worldwide Access)
+      // 3. Broadcast to all open tabs / windows on this device
+      try {
+        if (broadcastChan) {
+          broadcastChan.postMessage({ type: 'CLOUD_UPDATE', key, data });
+        }
+      } catch (_) {}
+
+      // 4. Global Cloud Relay Push (Multi-Device Worldwide Access)
       try {
         const cloudTopic = `ff_${key}`;
         await fetch(`https://ntfy.sh/${cloudTopic}`, {
@@ -605,67 +746,86 @@
       return true;
     };
 
-    const loadFromCloudRemote = async (key) => {
+    const loadFromCloudRemote = async (key, email = null) => {
       let cloudRecord = null;
 
-      // 1. Fetch from Global Cloud Server (with since=all & attachment file support for large datasets)
-      try {
-        const cloudTopic = `ff_${key}`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const fetchTopicDoc = async (topicName) => {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 6000);
+          const res = await fetch(`https://ntfy.sh/${topicName}/json?poll=1&since=all&t=${Date.now()}`, {
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
 
-        const res = await fetch(`https://ntfy.sh/${cloudTopic}/json?poll=1&since=all`, {
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-
-        if (res.ok) {
-          const text = await res.text();
-          if (text && text.trim()) {
-            const lines = text.trim().split('\n').filter(Boolean);
-            for (let i = lines.length - 1; i >= 0; i--) {
-              try {
-                const item = JSON.parse(lines[i]);
-                // Check if payload is stored in attachment file (for large payloads > 4KB)
-                if (item && item.attachment && item.attachment.url) {
-                  const fileRes = await fetch(item.attachment.url);
-                  if (fileRes.ok) {
-                    const doc = await fileRes.json();
-                    if (doc && (doc.email || doc.data)) {
-                      cloudRecord = doc;
-                      break;
+          if (res.ok) {
+            const text = await res.text();
+            if (text && text.trim()) {
+              const lines = text.trim().split('\n').filter(Boolean);
+              for (let i = lines.length - 1; i >= 0; i--) {
+                try {
+                  const item = JSON.parse(lines[i]);
+                  if (item && item.attachment && item.attachment.url) {
+                    const fileRes = await fetch(item.attachment.url);
+                    if (fileRes.ok) {
+                      const doc = await fileRes.json();
+                      if (doc && (doc.email || doc.data || doc.password || doc.passwordHash)) {
+                        return doc;
+                      }
                     }
                   }
-                }
-                // Check direct inline JSON message
-                if (item && item.message) {
-                  try {
-                    const parsedDoc = JSON.parse(item.message);
-                    if (parsedDoc && (parsedDoc.email || parsedDoc.data)) {
-                      cloudRecord = parsedDoc;
-                      break;
-                    }
-                  } catch (_) {}
-                }
-              } catch (_) {}
+                  if (item && item.message) {
+                    try {
+                      const parsedDoc = JSON.parse(item.message);
+                      if (parsedDoc && (parsedDoc.email || parsedDoc.data || parsedDoc.password || parsedDoc.passwordHash)) {
+                        return parsedDoc;
+                      }
+                    } catch (_) {}
+                  }
+                } catch (_) {}
+              }
             }
           }
+        } catch (err) {
+          console.warn(`Real cloud fetch warning for ${topicName}:`, err);
         }
-      } catch (err) {
-        console.warn('Real cloud fetch warning:', err);
+        return null;
+      };
+
+      // 1. Primary Topic
+      cloudRecord = await fetchTopicDoc(`ff_${key}`);
+
+      // 2. Legacy Topic Fallback
+      if (!cloudRecord && email) {
+        const legacyKey = getLegacyUserCloudKey(email);
+        if (legacyKey && legacyKey !== key) {
+          cloudRecord = await fetchTopicDoc(`ff_${legacyKey}`);
+        }
       }
 
-      // 2. If fetched, cache and update user list
+      // 3. Cache and update user list
       if (cloudRecord) {
         try {
           localStorage.setItem(`cloud_cache_${key}`, JSON.stringify(cloudRecord));
           if (cloudRecord.email) {
+            const cleanEmail = normalizeEmail(cloudRecord.email);
             const users = getRegisteredUsers();
-            const existingIdx = users.findIndex(u => normalizeEmail(u.email) === normalizeEmail(cloudRecord.email));
+            const existingIdx = users.findIndex(u => normalizeEmail(u.email) === cleanEmail);
+            const summary = {
+              id: cloudRecord.id || `usr-${Date.now()}`,
+              email: cleanEmail,
+              name: cloudRecord.name || cleanEmail.split('@')[0],
+              password: cloudRecord.password || '',
+              passwordHash: cloudRecord.passwordHash || '',
+              avatar: cloudRecord.avatar || null,
+              createdAt: cloudRecord.createdAt || new Date().toISOString(),
+              lastLogin: cloudRecord.lastLogin || new Date().toISOString(),
+              updatedAt: cloudRecord.updatedAt || new Date().toISOString(),
+            };
             if (existingIdx >= 0) {
-              users[existingIdx] = { ...users[existingIdx], ...cloudRecord };
+              users[existingIdx] = { ...users[existingIdx], ...summary };
             } else {
-              users.push(cloudRecord);
+              users.push(summary);
             }
             saveRegisteredUsers(users);
           }
@@ -673,10 +833,15 @@
         return cloudRecord;
       }
 
-      // 3. Fallback to local cache
+      // 4. Fallback to local cache
       try {
         const cached = localStorage.getItem(`cloud_cache_${key}`);
         if (cached) return JSON.parse(cached);
+        if (email) {
+          const legKey = getLegacyUserCloudKey(email);
+          const legCached = localStorage.getItem(`cloud_cache_${legKey}`);
+          if (legCached) return JSON.parse(legCached);
+        }
       } catch (_) {}
 
       return null;
@@ -733,15 +898,12 @@
       const passwordHash = await hashPassword(password);
       const enteredPlain = password.trim();
 
-      const existingCloud = await loadFromCloudRemote(cloudKey);
+      const existingCloud = await loadFromCloudRemote(cloudKey, cleanEmail);
       const existingLocal = findUserByEmail(cleanEmail);
       const existing = existingCloud || existingLocal;
 
       if (existing && (existing.password || existing.passwordHash)) {
-        const isMatch = 
-          (existing.password && existing.password === enteredPlain) ||
-          (existing.passwordHash && existing.passwordHash === passwordHash) ||
-          (existing.password && (await hashPassword(existing.password)) === passwordHash);
+        const isMatch = await verifyPasswordRecord(enteredPlain, existing);
 
         if (isMatch) {
           return loginCloudAccount({ email: cleanEmail, password: enteredPlain });
@@ -769,7 +931,7 @@
         id: existing?.id || `usr-${Date.now()}`,
         email: cleanEmail,
         name: displayName,
-        password: password.trim(),
+        password: enteredPlain,
         passwordHash: passwordHash,
         avatar: existing?.avatar || null,
         createdAt: existing?.createdAt || new Date().toISOString(),
@@ -814,7 +976,7 @@
       const enteredHash = await hashPassword(password);
       const enteredPlain = password.trim();
 
-      let userRecord = await loadFromCloudRemote(cloudKey);
+      let userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
       const localUser = findUserByEmail(cleanEmail);
 
       if (localUser) {
@@ -827,6 +989,7 @@
             passwordHash: localUser.passwordHash || '',
             avatar: localUser.avatar || null,
             createdAt: localUser.createdAt || new Date().toISOString(),
+            updatedAt: localUser.updatedAt || new Date().toISOString(),
             data: {
               tasks: getUserData(cleanEmail, 'tasks', getStored(STORAGE_KEYS.TASKS, DEFAULT_TASKS)),
               events: getUserData(cleanEmail, 'events', DEFAULT_EVENTS),
@@ -871,9 +1034,7 @@
         userRecord.passwordHash = enteredHash;
         await saveToCloudRemote(cloudKey, userRecord);
       } else {
-        const isMatch = (userRecord.password && userRecord.password === enteredPlain) ||
-                        (userRecord.passwordHash && userRecord.passwordHash === enteredHash) ||
-                        (userRecord.password && (await hashPassword(userRecord.password)) === enteredHash);
+        const isMatch = await verifyPasswordRecord(enteredPlain, userRecord);
 
         if (!isMatch) {
           return {
@@ -909,6 +1070,11 @@
         settings: getUserData(cleanEmail, 'settings', DEFAULT_SETTINGS),
       };
 
+      setUserData(cleanEmail, 'tasks', dataset.tasks);
+      setUserData(cleanEmail, 'events', dataset.events);
+      setUserData(cleanEmail, 'pomo_sessions', dataset.pomoSessions);
+      setUserData(cleanEmail, 'settings', dataset.settings);
+
       return {
         ok: true,
         user: sessionUser,
@@ -928,35 +1094,46 @@
 
       const cloudKey = await getUserCloudKey(cleanEmail);
       const newHash = await hashPassword(newPassword);
-      let userRecord = await loadFromCloudRemote(cloudKey);
-      const localUser = findUserByEmail(cleanEmail);
+      const enteredPlain = newPassword.trim();
+      let userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
+      const registeredUsers = getRegisteredUsers();
+      const localUser = registeredUsers.find(u => normalizeEmail(u.email) === cleanEmail);
 
       if (!userRecord && !localUser) {
         return registerCloudAccount({
           email: cleanEmail,
-          password: newPassword,
+          password: enteredPlain,
           name: cleanEmail.split('@')[0],
         });
       }
+
+      const existingData = userRecord?.data || {
+        tasks: getUserData(cleanEmail, 'tasks', DEFAULT_TASKS),
+        events: getUserData(cleanEmail, 'events', DEFAULT_EVENTS),
+        pomoSessions: getUserData(cleanEmail, 'pomo_sessions', generateInitialPomoSessions()),
+        settings: getUserData(cleanEmail, 'settings', DEFAULT_SETTINGS),
+      };
 
       const updatedRecord = {
         ...(userRecord || localUser || {}),
         id: userRecord?.id || localUser?.id || `usr-${Date.now()}`,
         email: cleanEmail,
         name: userRecord?.name || localUser?.name || cleanEmail.split('@')[0],
-        password: newPassword.trim(),
+        password: enteredPlain,
         passwordHash: newHash,
         updatedAt: new Date().toISOString(),
         lastLogin: new Date().toISOString(),
-        data: userRecord?.data || {
-          tasks: getUserData(cleanEmail, 'tasks', DEFAULT_TASKS),
-          events: getUserData(cleanEmail, 'events', DEFAULT_EVENTS),
-          pomoSessions: getUserData(cleanEmail, 'pomo_sessions', generateInitialPomoSessions()),
-          settings: getUserData(cleanEmail, 'settings', DEFAULT_SETTINGS),
-        }
+        data: existingData,
       };
 
       await saveToCloudRemote(cloudKey, updatedRecord);
+      const legacyKey = getLegacyUserCloudKey(cleanEmail);
+      if (legacyKey && legacyKey !== cloudKey) {
+        await saveToCloudRemote(legacyKey, updatedRecord);
+      }
+
+      const users = getRegisteredUsers().map(u => normalizeEmail(u.email) === cleanEmail ? { ...u, password: enteredPlain, passwordHash: newHash } : u);
+      saveRegisteredUsers(users);
 
       const sessionUser = {
         id: updatedRecord.id,
@@ -982,11 +1159,17 @@
       const cleanEmail = normalizeEmail(email);
       if (!cleanEmail) return { ok: false, message: 'Chưa xác định tài khoản!' };
 
-      const userRecord = await loadFromCloudRemote(await getUserCloudKey(cleanEmail));
+      const cloudKey = await getUserCloudKey(cleanEmail);
+      const userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
       const localUser = findUserByEmail(cleanEmail);
-      const currentPassword = userRecord?.password || localUser?.password;
+      const activeUser = userRecord || localUser;
 
-      if (currentPassword && currentPassword !== oldPassword?.trim()) {
+      if (!activeUser) {
+        return { ok: false, message: 'Không tìm thấy thông tin tài khoản!' };
+      }
+
+      const isOldValid = await verifyPasswordRecord(oldPassword, activeUser);
+      if (!isOldValid) {
         return { ok: false, message: 'Mật khẩu hiện tại không chính xác!' };
       }
       return resetCloudAccountPassword({ email: cleanEmail, newPassword });

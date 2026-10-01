@@ -31,12 +31,50 @@ export const SettingsModal = ({ isOpen, onClose }) => {
     resetToDefaults, 
     currentUser,
     isAccountLoggedIn,
+    changeAccountPassword,
     logoutAccount,
     showToast 
   } = useApp();
 
   const [formData, setFormData] = useState({ ...settings });
+  const [showChangePass, setShowChangePass] = useState(false);
+  const [oldPass, setOldPass] = useState('');
+  const [newPass, setNewPass] = useState('');
+  const [confirmPass, setConfirmPass] = useState('');
+  const [isUpdatingPass, setIsUpdatingPass] = useState(false);
   const fileInputRef = useRef(null);
+
+  const handleChangePasswordInline = async () => {
+    if (!oldPass) {
+      showToast('Vui lòng nhập mật khẩu hiện tại!', 'warning');
+      return;
+    }
+    if (!newPass || newPass.length < 4) {
+      showToast('Mật khẩu mới phải có ít nhất 4 ký tự!', 'warning');
+      return;
+    }
+    if (newPass !== confirmPass) {
+      showToast('Xác nhận mật khẩu mới không khớp!', 'warning');
+      return;
+    }
+
+    setIsUpdatingPass(true);
+    try {
+      const res = await changeAccountPassword({
+        oldPassword: oldPass,
+        newPassword: newPass,
+      });
+
+      if (res && res.ok) {
+        setOldPass('');
+        setNewPass('');
+        setConfirmPass('');
+        setShowChangePass(false);
+      }
+    } finally {
+      setIsUpdatingPass(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -116,42 +154,95 @@ export const SettingsModal = ({ isOpen, onClose }) => {
         </div>
 
         <form onSubmit={handleSave} className="space-y-6">
-          {/* Section: Account & Password */}
-          <div className="p-4 rounded-2xl bg-slate-100/70 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
-            <div className="flex items-center justify-between mb-2">
+          {/* Section: Account & Password Settings */}
+          <div className="p-4 rounded-2xl bg-slate-100/70 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
                 <Shield className="w-4 h-4 text-brand-500" />
-                <span>Tài Khoản & Mật Khẩu</span>
+                <span>Tài Khoản & Mật Khẩu Đồng Bộ</span>
               </div>
-              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
                 isAccountLoggedIn
                   ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                   : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
               }`}>
-                {isAccountLoggedIn ? 'Đã đăng nhập' : 'Chưa đăng nhập'}
+                {isAccountLoggedIn ? 'Đã kết nối đám mây' : 'Chưa đăng nhập'}
               </span>
             </div>
 
             {isAccountLoggedIn ? (
-              <div className="flex items-center justify-between pt-2">
-                <div>
-                  <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{currentUser?.name || 'Người dùng'}</p>
-                  <p className="text-[11px] text-slate-500 font-mono">{currentUser?.email}</p>
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{currentUser?.name || 'Người dùng'}</p>
+                    <p className="text-[11px] text-slate-500 font-mono">{currentUser?.email}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowChangePass(!showChangePass)}
+                      className="px-3 py-1.5 rounded-xl bg-brand-500/10 hover:bg-brand-500/20 text-brand-600 dark:text-brand-400 text-xs font-bold transition flex items-center gap-1"
+                    >
+                      <Lock className="w-3.5 h-3.5" /> {showChangePass ? 'Đóng' : 'Đổi mật khẩu'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        logoutAccount();
+                        onClose();
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold transition flex items-center gap-1"
+                    >
+                      <LogOut className="w-3.5 h-3.5" /> Đăng xuất
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    logoutAccount();
-                    onClose();
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold transition flex items-center gap-1"
-                >
-                  <LogOut className="w-3.5 h-3.5" /> Đăng xuất
-                </button>
+
+                {/* Inline Change Password Subform */}
+                {showChangePass && (
+                  <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-3 animate-fade-in">
+                    <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Cập nhật mật khẩu mới (Tự động đồng bộ ngay sang điện thoại & máy tính):
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <input
+                        type="password"
+                        placeholder="Mật khẩu cũ"
+                        value={oldPass}
+                        onChange={(e) => setOldPass(e.target.value)}
+                        className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      />
+                      <input
+                        type="password"
+                        placeholder="Mật khẩu mới (>=4 ký tự)"
+                        value={newPass}
+                        onChange={(e) => setNewPass(e.target.value)}
+                        className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      />
+                      <input
+                        type="password"
+                        placeholder="Xác nhận mật khẩu"
+                        value={confirmPass}
+                        onChange={(e) => setConfirmPass(e.target.value)}
+                        className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={handleChangePasswordInline}
+                        disabled={isUpdatingPass}
+                        className="px-3.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow transition disabled:opacity-50"
+                      >
+                        {isUpdatingPass ? 'Đang cập nhật...' : 'Lưu Mật Khẩu Mới'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <p className="text-xs text-slate-500 dark:text-slate-400 pt-1">
-                Đăng nhập Gmail có mật khẩu riêng để bảo vệ và lưu các chỉnh sửa lịch trình của bạn.
+                Đăng nhập Gmail có mật khẩu riêng để bảo vệ và lưu các chỉnh sửa lịch trình của bạn trên mọi điện thoại và máy tính.
               </p>
             )}
           </div>

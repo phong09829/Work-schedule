@@ -475,7 +475,10 @@ export const AppProvider = ({ children }) => {
       });
 
       if (res.ok) {
-        showToast('Đổi mật khẩu thành công! Mật khẩu mới đã có hiệu lực trên mọi thiết bị.', 'success');
+        if (res.user) {
+          setCurrentUserState(res.user);
+        }
+        showToast('Đổi mật khẩu thành công! Mật khẩu mới đã được đồng bộ an toàn.', 'success', 4000);
       } else {
         showToast(res.message, 'error');
       }

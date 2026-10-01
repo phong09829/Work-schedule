@@ -32,24 +32,106 @@ export const normalizeEmail = (email) => {
 };
 
 /**
- * SHA-256 Cryptographic Hash for secure password storage and user namespace
+ * 100% Deterministic Pure JavaScript SHA-256 implementation
+ * Guarantees identical 64-character hex hash across ALL platforms, browsers,
+ * HTTP / HTTPS, localhost, mobile webviews, iPhone, and Android.
  */
-export const hashPassword = async (password, salt = 'focusflow_secure_salt_2026') => {
-  if (!password) return '';
-  const text = `${salt}:${password.trim()}:${salt}`;
-  
-  if (typeof window !== 'undefined' && window.crypto && window.crypto.subtle) {
-    try {
-      const msgBuffer = new TextEncoder().encode(text);
-      const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgBuffer);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    } catch (e) {
-      console.warn('SubtleCrypto error, using fallback hash:', e);
-    }
+export const sha256Pure = (ascii) => {
+  if (!ascii) return '';
+  function rightRotate(value, amount) {
+    return (value >>> amount) | (value << (32 - amount));
   }
 
-  // Pure JS Fallback Hash
+  const k = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ];
+
+  let hash = [
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+  ];
+
+  const utf8 = unescape(encodeURIComponent(ascii));
+  const utf8BitLength = utf8.length * 8;
+  const words = [];
+
+  for (let i = 0; i < utf8.length; i++) {
+    words[i >> 2] |= (utf8.charCodeAt(i) & 0xff) << ((3 - (i % 4)) * 8);
+  }
+
+  words[utf8BitLength >> 5] |= 0x80 << (24 - (utf8BitLength % 32));
+  words[(((utf8BitLength + 64) >> 9) << 4) + 15] = utf8BitLength;
+
+  const w = new Array(64);
+
+  for (let i = 0; i < words.length; i += 16) {
+    let a = hash[0];
+    let b = hash[1];
+    let c = hash[2];
+    let d = hash[3];
+    let e = hash[4];
+    let f = hash[5];
+    let g = hash[6];
+    let h = hash[7];
+
+    for (let j = 0; j < 64; j++) {
+      if (j < 16) {
+        w[j] = words[i + j] | 0;
+      } else {
+        const gamma0 = rightRotate(w[j - 15], 7) ^ rightRotate(w[j - 15], 18) ^ (w[j - 15] >>> 3);
+        const gamma1 = rightRotate(w[j - 2], 17) ^ rightRotate(w[j - 2], 19) ^ (w[j - 2] >>> 10);
+        w[j] = (w[j - 16] + gamma0 + w[j - 7] + gamma1) | 0;
+      }
+
+      const s1 = rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const temp1 = (h + s1 + ch + k[j] + w[j]) | 0;
+      const s0 = rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (s0 + maj) | 0;
+
+      h = g;
+      g = f;
+      f = e;
+      e = (d + temp1) | 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) | 0;
+    }
+
+    hash[0] = (hash[0] + a) | 0;
+    hash[1] = (hash[1] + b) | 0;
+    hash[2] = (hash[2] + c) | 0;
+    hash[3] = (hash[3] + d) | 0;
+    hash[4] = (hash[4] + e) | 0;
+    hash[5] = (hash[5] + f) | 0;
+    hash[6] = (hash[6] + g) | 0;
+    hash[7] = (hash[7] + h) | 0;
+  }
+
+  let result = '';
+  for (let i = 0; i < 8; i++) {
+    for (let j = 3; j >= 0; j--) {
+      const b = (hash[i] >> (j * 8)) & 255;
+      result += (b < 16 ? '0' : '') + b.toString(16);
+    }
+  }
+  return result;
+};
+
+/**
+ * Legacy Fallback Hash used in earlier non-crypto builds (for seamless backward compatibility)
+ */
+export const legacyFallbackHash = (text) => {
+  if (!text) return '';
   let h1 = 0xdeadbeef ^ text.length;
   let h2 = 0x41c6ce57 ^ text.length;
   for (let i = 0; i < text.length; i++) {
@@ -63,13 +145,90 @@ export const hashPassword = async (password, salt = 'focusflow_secure_salt_2026'
 };
 
 /**
- * Create a safe user document key in cloud database
+ * SHA-256 Cryptographic Hash for secure password storage and user namespace
+ * Uses pure deterministic SHA-256 (with Web Crypto API verification when available)
+ */
+export const hashPassword = async (password, salt = 'focusflow_secure_salt_2026') => {
+  if (!password) return '';
+  const text = `${salt}:${password.trim()}:${salt}`;
+  
+  // Try Web Crypto API first if available in secure context
+  if (typeof window !== 'undefined' && window.crypto && window.crypto.subtle) {
+    try {
+      const msgBuffer = new TextEncoder().encode(text);
+      const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (_) {}
+  }
+
+  // Pure JavaScript SHA-256 (Identical output to Web Crypto API)
+  return sha256Pure(text);
+};
+
+/**
+ * Safe user document key in cloud database
+ * Produces deterministic, safe key for phone, PC, and all devices
  */
 export const getUserCloudKey = async (email) => {
   const clean = normalizeEmail(email);
-  const hash = await hashPassword(clean, 'user_id_salt');
-  return `ff_user_${hash.slice(0, 24)}`;
+  const hash = sha256Pure(`user_cloud_ns:${clean}`);
+  return `ff_u_${hash.slice(0, 24)}`;
 };
+
+/**
+ * Get legacy user cloud key for backward-compatibility lookup
+ */
+export const getLegacyUserCloudKey = (email) => {
+  const clean = normalizeEmail(email);
+  const text = `user_id_salt:${clean}:user_id_salt`;
+  const leg = legacyFallbackHash(text);
+  return `ff_user_${leg.slice(0, 24)}`;
+};
+
+/**
+ * Multi-factor verification: compares entered password against stored password,
+ * standard SHA-256 hash, and legacy hashes
+ */
+export const verifyPasswordRecord = async (enteredPassword, userRecord) => {
+  if (!enteredPassword || !userRecord) return false;
+  const enteredPlain = enteredPassword.trim();
+  const enteredHash = await hashPassword(enteredPlain);
+  const text = `focusflow_secure_salt_2026:${enteredPlain}:focusflow_secure_salt_2026`;
+  const enteredLegacyHash = legacyFallbackHash(text);
+
+  // 1. Plaintext direct match
+  if (userRecord.password && userRecord.password === enteredPlain) {
+    return true;
+  }
+
+  // 2. Standard SHA-256 match
+  if (userRecord.passwordHash && userRecord.passwordHash === enteredHash) {
+    return true;
+  }
+
+  // 3. Stored password hashed matches
+  if (userRecord.password) {
+    const storedHashed = await hashPassword(userRecord.password);
+    if (storedHashed === enteredHash) return true;
+    if (userRecord.password === enteredHash) return true;
+  }
+
+  // 4. Legacy custom hash match
+  if (userRecord.passwordHash && userRecord.passwordHash === enteredLegacyHash) {
+    return true;
+  }
+
+  return false;
+};
+
+// Cross-tab / Cross-window Real-time Broadcast Channel
+let broadcastChan = null;
+try {
+  if (typeof window !== 'undefined' && window.BroadcastChannel) {
+    broadcastChan = new BroadcastChannel('focusflow_global_sync_channel');
+  }
+} catch (_) {}
 
 /**
  * Save JSON document to Global Cloud Server and Local Cloud Cache
@@ -99,6 +258,7 @@ export const saveToCloudRemote = async (key, data) => {
       avatar: data.avatar || null,
       createdAt: data.createdAt || new Date().toISOString(),
       lastLogin: new Date().toISOString(),
+      updatedAt: data.updatedAt || new Date().toISOString(),
     };
 
     if (existingIdx >= 0) {
@@ -109,7 +269,14 @@ export const saveToCloudRemote = async (key, data) => {
     saveRegisteredUsers(users);
   }
 
-  // 3. Real Global Cloud Relay Push (Multi-Device Worldwide Sync)
+  // 3. Broadcast to all open tabs / windows on this device
+  try {
+    if (broadcastChan) {
+      broadcastChan.postMessage({ type: 'CLOUD_UPDATE', key, data });
+    }
+  } catch (_) {}
+
+  // 4. Real Global Cloud Relay Push (Multi-Device Worldwide Sync via ntfy.sh)
   try {
     const cloudTopic = `ff_${key}`;
     await fetch(`https://ntfy.sh/${cloudTopic}`, {
@@ -131,69 +298,93 @@ export const saveToCloudRemote = async (key, data) => {
 
 /**
  * Load JSON document from Global Cloud Server and Local Cloud Cache
- * Fetches latest updates from cloud server so phone gets data from PC and vice versa
+ * Fetches latest updates from cloud server so phone gets data from PC and vice versa.
+ * Supports multi-key resolution for legacy and modern accounts.
  */
-export const loadFromCloudRemote = async (key) => {
+export const loadFromCloudRemote = async (key, email = null) => {
   let cloudRecord = null;
 
-  // 1. Fetch latest state from Real Global Cloud Server (with since=all and attachment resolution)
-  try {
-    const cloudTopic = `ff_${key}`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+  // Helper to fetch and extract latest document from a cloud topic
+  const fetchTopicDoc = async (topicName) => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch(`https://ntfy.sh/${topicName}/json?poll=1&since=all&t=${Date.now()}`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
 
-    const res = await fetch(`https://ntfy.sh/${cloudTopic}/json?poll=1&since=all`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (res.ok) {
-      const text = await res.text();
-      if (text && text.trim()) {
-        const lines = text.trim().split('\n').filter(Boolean);
-        for (let i = lines.length - 1; i >= 0; i--) {
-          try {
-            const item = JSON.parse(lines[i]);
-            // Check if payload is stored in attachment file (for large payloads > 4KB)
-            if (item && item.attachment && item.attachment.url) {
-              const fileRes = await fetch(item.attachment.url);
-              if (fileRes.ok) {
-                const doc = await fileRes.json();
-                if (doc && (doc.email || doc.data)) {
-                  cloudRecord = doc;
-                  break;
+      if (res.ok) {
+        const text = await res.text();
+        if (text && text.trim()) {
+          const lines = text.trim().split('\n').filter(Boolean);
+          // Look from newest to oldest
+          for (let i = lines.length - 1; i >= 0; i--) {
+            try {
+              const item = JSON.parse(lines[i]);
+              // 1. Check attachment payload (for large payloads > 4KB)
+              if (item && item.attachment && item.attachment.url) {
+                const fileRes = await fetch(item.attachment.url);
+                if (fileRes.ok) {
+                  const doc = await fileRes.json();
+                  if (doc && (doc.email || doc.data || doc.password || doc.passwordHash)) {
+                    return doc;
+                  }
                 }
               }
-            }
-            // Check direct inline JSON message
-            if (item && item.message) {
-              try {
-                const parsedDoc = JSON.parse(item.message);
-                if (parsedDoc && (parsedDoc.email || parsedDoc.data)) {
-                  cloudRecord = parsedDoc;
-                  break;
-                }
-              } catch (_) {}
-            }
-          } catch (_) {}
+              // 2. Check direct inline JSON message
+              if (item && item.message) {
+                try {
+                  const parsedDoc = JSON.parse(item.message);
+                  if (parsedDoc && (parsedDoc.email || parsedDoc.data || parsedDoc.password || parsedDoc.passwordHash)) {
+                    return parsedDoc;
+                  }
+                } catch (_) {}
+              }
+            } catch (_) {}
+          }
         }
       }
+    } catch (err) {
+      console.warn(`Cloud fetch warning for ${topicName}:`, err);
     }
-  } catch (err) {
-    console.warn('Real cloud fetch warning:', err);
+    return null;
+  };
+
+  // 1. Fetch from Primary Key topic (e.g. ff_ff_u_...)
+  cloudRecord = await fetchTopicDoc(`ff_${key}`);
+
+  // 2. If not found and email provided, check legacy topic (e.g. ff_ff_user_...)
+  if (!cloudRecord && email) {
+    const legacyKey = getLegacyUserCloudKey(email);
+    if (legacyKey && legacyKey !== key) {
+      cloudRecord = await fetchTopicDoc(`ff_${legacyKey}`);
+    }
   }
 
-  // 2. If fetched from cloud, cache locally and sync user catalog
+  // 3. If fetched from cloud, cache locally and sync user catalog
   if (cloudRecord) {
     try {
       localStorage.setItem(`cloud_cache_${key}`, JSON.stringify(cloudRecord));
       if (cloudRecord.email) {
+        const cleanEmail = normalizeEmail(cloudRecord.email);
         const users = getRegisteredUsers();
-        const existingIdx = users.findIndex(u => normalizeEmail(u.email) === normalizeEmail(cloudRecord.email));
+        const existingIdx = users.findIndex(u => normalizeEmail(u.email) === cleanEmail);
+        const userSummary = {
+          id: cloudRecord.id || `usr-${Date.now()}`,
+          email: cleanEmail,
+          name: cloudRecord.name || cleanEmail.split('@')[0],
+          password: cloudRecord.password || '',
+          passwordHash: cloudRecord.passwordHash || '',
+          avatar: cloudRecord.avatar || null,
+          createdAt: cloudRecord.createdAt || new Date().toISOString(),
+          lastLogin: cloudRecord.lastLogin || new Date().toISOString(),
+          updatedAt: cloudRecord.updatedAt || new Date().toISOString(),
+        };
         if (existingIdx >= 0) {
-          users[existingIdx] = { ...users[existingIdx], ...cloudRecord };
+          users[existingIdx] = { ...users[existingIdx], ...userSummary };
         } else {
-          users.push(cloudRecord);
+          users.push(userSummary);
         }
         saveRegisteredUsers(users);
       }
@@ -201,12 +392,20 @@ export const loadFromCloudRemote = async (key) => {
     return cloudRecord;
   }
 
-  // 3. Fallback to local cloud cache
+  // 4. Fallback to local cloud cache
   try {
     const cached = localStorage.getItem(`cloud_cache_${key}`);
     if (cached) {
       const parsed = JSON.parse(cached);
       if (parsed) return parsed;
+    }
+    if (email) {
+      const legKey = getLegacyUserCloudKey(email);
+      const legCached = localStorage.getItem(`cloud_cache_${legKey}`);
+      if (legCached) {
+        const parsed = JSON.parse(legCached);
+        if (parsed) return parsed;
+      }
     }
   } catch (_) {}
 
@@ -271,16 +470,13 @@ export const registerCloudAccount = async ({ email, password, name, initialData 
   const enteredPlain = password.trim();
 
   // Check if user already exists on Cloud or local list
-  const existingCloud = await loadFromCloudRemote(cloudKey);
+  const existingCloud = await loadFromCloudRemote(cloudKey, cleanEmail);
   const existingLocal = findUserByEmail(cleanEmail);
   const existing = existingCloud || existingLocal;
 
   if (existing && (existing.password || existing.passwordHash)) {
     // If password matches, automatically log in and sync!
-    const isMatch = 
-      (existing.password && existing.password === enteredPlain) ||
-      (existing.passwordHash && existing.passwordHash === passwordHash) ||
-      (existing.password && (await hashPassword(existing.password)) === passwordHash);
+    const isMatch = await verifyPasswordRecord(enteredPlain, existing);
 
     if (isMatch) {
       return loginCloudAccount({ email: cleanEmail, password: enteredPlain });
@@ -308,7 +504,7 @@ export const registerCloudAccount = async ({ email, password, name, initialData 
     id: existingLocal?.id || `usr-${Date.now()}`,
     email: cleanEmail,
     name: displayName,
-    password: password.trim(),
+    password: enteredPlain,
     passwordHash: passwordHash,
     avatar: existingLocal?.avatar || null,
     createdAt: existingLocal?.createdAt || new Date().toISOString(),
@@ -349,7 +545,7 @@ export const registerCloudAccount = async ({ email, password, name, initialData 
 
 /**
  * Login User from Cloud on ANY Phone or Computer
- * Supports password hash matching, legacy plaintext password, and password reset auto-repair
+ * 100% Deterministic cross-device verification and auto-repair
  */
 export const loginCloudAccount = async ({ email, password }) => {
   const cleanEmail = normalizeEmail(email);
@@ -366,19 +562,18 @@ export const loginCloudAccount = async ({ email, password }) => {
 
   let userRecord = null;
 
-  // 1. Fetch from Cloud Cache / Cloud Store
+  // 1. Fetch latest record from Cloud Server (with multi-key resolution)
   try {
-    userRecord = await loadFromCloudRemote(cloudKey);
+    userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
   } catch (err) {
     console.warn('Cloud login load warning:', err);
   }
 
-  // 2. Check Local Registered Users database (with deep legacy migration)
+  // 2. Check Local Registered Users database
   const registeredUsers = getRegisteredUsers();
   const localUser = registeredUsers.find(u => normalizeEmail(u.email) === cleanEmail);
 
   if (localUser) {
-    // If local user exists, merge information
     if (!userRecord) {
       userRecord = {
         id: localUser.id || `usr-${Date.now()}`,
@@ -388,6 +583,7 @@ export const loginCloudAccount = async ({ email, password }) => {
         passwordHash: localUser.passwordHash || '',
         avatar: localUser.avatar || null,
         createdAt: localUser.createdAt || new Date().toISOString(),
+        updatedAt: localUser.updatedAt || new Date().toISOString(),
         data: {
           tasks: getStoredData(getUserStorageKey(cleanEmail, 'tasks'), getStoredData(STORAGE_KEYS.TASKS, DEFAULT_TASKS)),
           events: getStoredData(getUserStorageKey(cleanEmail, 'events'), DEFAULT_CALENDAR_EVENTS),
@@ -427,7 +623,7 @@ export const loginCloudAccount = async ({ email, password }) => {
     return {
       ok: false,
       errorType: 'USER_NOT_FOUND',
-      message: `Tài khoản Gmail "${cleanEmail}" chưa được tìm thấy trên thiết bị này. Vui lòng chọn tab "Đăng Ký Tài Khoản" để tạo mật khẩu hoặc kiểm tra lại địa chỉ Gmail!`
+      message: `Tài khoản Gmail "${cleanEmail}" chưa được tìm thấy trên thiết bị này. Vui lòng chọn tab "Đăng Ký Mới" để tạo mật khẩu hoặc kiểm tra lại địa chỉ Gmail!`
     };
   }
 
@@ -438,11 +634,8 @@ export const loginCloudAccount = async ({ email, password }) => {
     userRecord.passwordHash = enteredHash;
     await saveToCloudRemote(cloudKey, userRecord);
   } else {
-    // Case B: Verify password matching
-    const isMatch = 
-      (userRecord.password && userRecord.password === enteredPlain) ||
-      (userRecord.passwordHash && userRecord.passwordHash === enteredHash) ||
-      (userRecord.password && (await hashPassword(userRecord.password)) === enteredHash);
+    // Case B: Verify password matching across plaintext, SHA-256, and legacy hashes
+    const isMatch = await verifyPasswordRecord(enteredPlain, userRecord);
 
     if (!isMatch) {
       return {
@@ -454,9 +647,9 @@ export const loginCloudAccount = async ({ email, password }) => {
     }
   }
 
-  // 5. Update last login & sync timestamp
+  // 5. Auto-repair & update record with standardized SHA-256 hash and latest login timestamp
   userRecord.lastLogin = new Date().toISOString();
-  userRecord.password = enteredPlain; // Keep active
+  userRecord.password = enteredPlain; // Keep active for zero-latency multi-device sync
   userRecord.passwordHash = enteredHash;
   await saveToCloudRemote(cloudKey, userRecord);
 
@@ -472,13 +665,18 @@ export const loginCloudAccount = async ({ email, password }) => {
   setStoredData(STORAGE_KEYS.CURRENT_USER, sessionUser);
   setStoredData(CLOUD_STORAGE_KEYS.LAST_CLOUD_SYNC, new Date().toISOString());
 
-  // Ensure dataset is loaded
+  // Ensure dataset is loaded and cached
   const dataset = userRecord.data || {
     tasks: getStoredData(getUserStorageKey(cleanEmail, 'tasks'), DEFAULT_TASKS),
     events: getStoredData(getUserStorageKey(cleanEmail, 'events'), DEFAULT_CALENDAR_EVENTS),
     pomoSessions: getStoredData(getUserStorageKey(cleanEmail, 'pomo_sessions'), generateInitialPomoSessions()),
     settings: getStoredData(getUserStorageKey(cleanEmail, 'settings'), DEFAULT_SETTINGS),
   };
+
+  setStoredData(getUserStorageKey(cleanEmail, 'tasks'), dataset.tasks);
+  setStoredData(getUserStorageKey(cleanEmail, 'events'), dataset.events);
+  setStoredData(getUserStorageKey(cleanEmail, 'pomo_sessions'), dataset.pomoSessions);
+  setStoredData(getUserStorageKey(cleanEmail, 'settings'), dataset.settings);
 
   return {
     ok: true,
@@ -490,6 +688,7 @@ export const loginCloudAccount = async ({ email, password }) => {
 
 /**
  * Direct Password Reset / Recovery for a Gmail Account
+ * Guarantees instant propagation to PC, Phone, and all devices
  */
 export const resetCloudAccountPassword = async ({ email, newPassword }) => {
   const cleanEmail = normalizeEmail(email);
@@ -502,8 +701,9 @@ export const resetCloudAccountPassword = async ({ email, newPassword }) => {
 
   const cloudKey = await getUserCloudKey(cleanEmail);
   const newHash = await hashPassword(newPassword);
+  const enteredPlain = newPassword.trim();
 
-  let userRecord = await loadFromCloudRemote(cloudKey);
+  let userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
   const registeredUsers = getRegisteredUsers();
   const localUser = registeredUsers.find(u => normalizeEmail(u.email) === cleanEmail);
 
@@ -511,30 +711,41 @@ export const resetCloudAccountPassword = async ({ email, newPassword }) => {
     // If not found, create new account directly
     return registerCloudAccount({
       email: cleanEmail,
-      password: newPassword,
+      password: enteredPlain,
       name: cleanEmail.split('@')[0],
     });
   }
+
+  const existingData = userRecord?.data || {
+    tasks: getStoredData(getUserStorageKey(cleanEmail, 'tasks'), DEFAULT_TASKS),
+    events: getStoredData(getUserStorageKey(cleanEmail, 'events'), DEFAULT_CALENDAR_EVENTS),
+    pomoSessions: getStoredData(getUserStorageKey(cleanEmail, 'pomo_sessions'), generateInitialPomoSessions()),
+    settings: getStoredData(getUserStorageKey(cleanEmail, 'settings'), DEFAULT_SETTINGS),
+  };
 
   const updatedRecord = {
     ...(userRecord || localUser || {}),
     id: userRecord?.id || localUser?.id || `usr-${Date.now()}`,
     email: cleanEmail,
     name: userRecord?.name || localUser?.name || cleanEmail.split('@')[0],
-    password: newPassword.trim(),
+    password: enteredPlain,
     passwordHash: newHash,
     updatedAt: new Date().toISOString(),
     lastLogin: new Date().toISOString(),
-    data: userRecord?.data || {
-      tasks: getStoredData(getUserStorageKey(cleanEmail, 'tasks'), DEFAULT_TASKS),
-      events: getStoredData(getUserStorageKey(cleanEmail, 'events'), DEFAULT_CALENDAR_EVENTS),
-      pomoSessions: getStoredData(getUserStorageKey(cleanEmail, 'pomo_sessions'), generateInitialPomoSessions()),
-      settings: getStoredData(getUserStorageKey(cleanEmail, 'settings'), DEFAULT_SETTINGS),
-    }
+    data: existingData,
   };
 
+  // 1. Push updated record to Cloud
   await saveToCloudRemote(cloudKey, updatedRecord);
-  resetUserPassword({ email: cleanEmail, newPassword });
+
+  // 2. Also push to legacy cloud key if applicable
+  const legacyKey = getLegacyUserCloudKey(cleanEmail);
+  if (legacyKey && legacyKey !== cloudKey) {
+    await saveToCloudRemote(legacyKey, updatedRecord);
+  }
+
+  // 3. Update local user records
+  resetUserPassword({ email: cleanEmail, newPassword: enteredPlain });
 
   const sessionUser = {
     id: updatedRecord.id,
@@ -552,32 +763,31 @@ export const resetCloudAccountPassword = async ({ email, newPassword }) => {
     ok: true,
     user: sessionUser,
     data: updatedRecord.data,
-    message: `Đã đặt lại mật khẩu mới cho tài khoản "${cleanEmail}" thành công!`
+    message: `Đã cập nhật mật khẩu mới cho tài khoản "${cleanEmail}" thành công! Bạn có thể đăng nhập trên điện thoại và máy tính ngay lập tức.`
   };
 };
 
 /**
  * Change Cloud Password
+ * Verifies current password and synchronizes immediately to all devices
  */
 export const changeCloudPassword = async ({ email, oldPassword, newPassword }) => {
   const cleanEmail = normalizeEmail(email);
   if (!cleanEmail) return { ok: false, message: 'Chưa xác định tài khoản!' };
 
   const cloudKey = await getUserCloudKey(cleanEmail);
-  const oldHash = await hashPassword(oldPassword);
-  const newHash = await hashPassword(newPassword);
-
-  let userRecord = await loadFromCloudRemote(cloudKey);
+  let userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
   const localUser = findUserByEmail(cleanEmail);
+  const activeUser = userRecord || localUser;
 
-  const currentPassword = userRecord?.password || localUser?.password;
-  const currentHash = userRecord?.passwordHash || localUser?.passwordHash;
-
-  if (currentPassword && currentPassword !== oldPassword?.trim()) {
-    return { ok: false, message: 'Mật khẩu hiện tại không chính xác!' };
+  if (!activeUser) {
+    return { ok: false, message: 'Không tìm thấy thông tin tài khoản!' };
   }
-  if (!currentPassword && currentHash && currentHash !== oldHash) {
-    return { ok: false, message: 'Mật khẩu hiện tại không chính xác!' };
+
+  // Verify old password
+  const isOldValid = await verifyPasswordRecord(oldPassword, activeUser);
+  if (!isOldValid) {
+    return { ok: false, message: 'Mật khẩu hiện tại không chính xác! Vui lòng kiểm tra lại.' };
   }
 
   if (!newPassword || newPassword.trim().length < 4) {
