@@ -433,6 +433,83 @@ export const changeUserPassword = ({ email, oldPassword, newPassword }) => {
   return resetUserPassword({ email: cleanEmail, newPassword });
 };
 
+// Delete a specific user account from local storage
+export const deleteUserAccount = (email) => {
+  const cleanEmail = normalizeEmail(email);
+  if (!cleanEmail) return false;
+
+  const users = getRegisteredUsers().filter(u => normalizeEmail(u.email) !== cleanEmail);
+  saveRegisteredUsers(users);
+
+  const cur = getCurrentUser();
+  if (cur && normalizeEmail(cur.email) === cleanEmail) {
+    setCurrentUser(null);
+  }
+
+  // Remove isolated data keys
+  try {
+    localStorage.removeItem(getUserStorageKey(cleanEmail, 'tasks'));
+    localStorage.removeItem(getUserStorageKey(cleanEmail, 'events'));
+    localStorage.removeItem(getUserStorageKey(cleanEmail, 'pomo_sessions'));
+    localStorage.removeItem(getUserStorageKey(cleanEmail, 'settings'));
+  } catch (_) {}
+
+  return true;
+};
+
+// Permanently delete ALL Gmail accounts and reset user storage on this device
+export const clearAllRegisteredAccounts = () => {
+  try {
+    // 1. Remove current user & registered users list
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    localStorage.removeItem(STORAGE_KEYS.USERS);
+
+    // 2. Remove all legacy user keys
+    const keysToRemove = [
+      'focusflow_registered_users_v2',
+      'focusflow_registered_users_v1',
+      'focusflow_users_v1',
+      'focusflow_users',
+      'focusflow_current_user_v2',
+      'focusflow_current_user_v1',
+      'focusflow_current_user',
+      'focusflow_user_profile_v1',
+      'focusflow_google_user_v1',
+      'focusflow_cloud_cached_users_v2',
+      'focusflow_cloud_cached_users_v1',
+      'focusflow_last_cloud_sync_time_v1',
+      'focusflow_cloud_last_sync_v2'
+    ];
+    keysToRemove.forEach(k => {
+      try { localStorage.removeItem(k); } catch (_) {}
+    });
+
+    // 3. Scan & remove all user-specific data keys and cloud caches
+    const keysInStorage = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k) keysInStorage.push(k);
+    }
+
+    keysInStorage.forEach(k => {
+      if (
+        k.startsWith('focusflow_u_') ||
+        k.startsWith('cloud_cache_') ||
+        k.startsWith('focusflow_google_')
+      ) {
+        try { localStorage.removeItem(k); } catch (_) {}
+      }
+    });
+
+    // 4. Save empty registered users list
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify([]));
+    return true;
+  } catch (err) {
+    console.error('Error clearing registered accounts:', err);
+    return false;
+  }
+};
+
 // User-specific data helper functions
 export const getUserData = (email, dataType, fallback) => {
   const key = getUserStorageKey(email, dataType);

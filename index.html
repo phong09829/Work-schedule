@@ -709,6 +709,62 @@
       setStored(key, value);
     };
 
+    const deleteUserAccount = (email) => {
+      const cleanEmail = normalizeEmail(email);
+      if (!cleanEmail) return false;
+      const users = getRegisteredUsers().filter(u => normalizeEmail(u.email) !== cleanEmail);
+      saveRegisteredUsers(users);
+      const cur = getCurrentUser();
+      if (cur && normalizeEmail(cur.email) === cleanEmail) {
+        setCurrentUser(null);
+      }
+      try {
+        localStorage.removeItem(getUserStorageKey(cleanEmail, 'tasks'));
+        localStorage.removeItem(getUserStorageKey(cleanEmail, 'events'));
+        localStorage.removeItem(getUserStorageKey(cleanEmail, 'pomo_sessions'));
+        localStorage.removeItem(getUserStorageKey(cleanEmail, 'settings'));
+      } catch (_) {}
+      return true;
+    };
+
+    const clearAllRegisteredAccounts = () => {
+      try {
+        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+        localStorage.removeItem(STORAGE_KEYS.USERS);
+        const keysToRemove = [
+          'focusflow_registered_users_v2',
+          'focusflow_registered_users_v1',
+          'focusflow_users_v1',
+          'focusflow_users',
+          'focusflow_current_user_v2',
+          'focusflow_current_user_v1',
+          'focusflow_current_user',
+          'focusflow_user_profile_v1',
+          'focusflow_google_user_v1',
+          'focusflow_cloud_cached_users_v2',
+          'focusflow_cloud_cached_users_v1',
+          'focusflow_last_cloud_sync_time_v1',
+          'focusflow_cloud_last_sync_v2'
+        ];
+        keysToRemove.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+
+        const keysInStorage = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k) keysInStorage.push(k);
+        }
+        keysInStorage.forEach(k => {
+          if (k.startsWith('focusflow_u_') || k.startsWith('cloud_cache_') || k.startsWith('focusflow_google_')) {
+            try { localStorage.removeItem(k); } catch (_) {}
+          }
+        });
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify([]));
+        return true;
+      } catch (err) {
+        return false;
+      }
+    };
+
     const saveToCloudRemote = async (key, data) => {
       if (!data) return false;
       const cleanEmail = normalizeEmail(data.email || (key && key.includes('@') ? key : ''));
@@ -1440,6 +1496,46 @@
       return null;
     };
 
+    const deleteCloudAccount = async (email) => {
+      const cleanEmail = normalizeEmail(email);
+      if (!cleanEmail) return false;
+      const topics = getCloudTopics(cleanEmail);
+      const tombstone = {
+        type: 'DELETED',
+        email: cleanEmail,
+        deletedAt: new Date().toISOString(),
+        data: null,
+        password: '',
+        passwordHash: '',
+      };
+      try {
+        const payload = JSON.stringify(tombstone);
+        fetch(`https://ntfy.sh/${topics.authTopic}`, { method: 'POST', body: payload, headers: { 'Title': 'FocusFlow Account Deleted', 'Priority': 'urgent' } }).catch(() => {});
+        fetch(`https://ntfy.sh/${topics.dataTopic}`, { method: 'POST', body: payload, headers: { 'Title': 'FocusFlow Data Cleared', 'Priority': 'urgent' } }).catch(() => {});
+        fetch(`https://ntfy.sh/${topics.mainTopic}`, { method: 'POST', body: payload, headers: { 'Title': 'FocusFlow Wiped', 'Priority': 'urgent' } }).catch(() => {});
+        if (topics.legacyTopic && topics.legacyTopic !== topics.mainTopic) {
+          fetch(`https://ntfy.sh/${topics.legacyTopic}`, { method: 'POST', body: payload }).catch(() => {});
+        }
+      } catch (_) {}
+      deleteUserAccount(cleanEmail);
+      try {
+        localStorage.removeItem(`cloud_cache_${topics.mainTopic}`);
+        localStorage.removeItem(`cloud_cache_${topics.legacyTopic}`);
+      } catch (_) {}
+      return true;
+    };
+
+    const clearAllCloudAccounts = async () => {
+      const users = getRegisteredUsers();
+      for (const u of users) {
+        if (u.email) {
+          await deleteCloudAccount(u.email);
+        }
+      }
+      clearAllRegisteredAccounts();
+      return true;
+    };
+
     const formatForDateTimeInput = (date) => {
       if (!date) return '';
       const d = typeof date === 'string' ? new Date(date) : date;
@@ -1997,6 +2093,44 @@
         showToast('Đã đăng xuất tài khoản.', 'info');
       };
 
+      const deleteAccount = async (email) => {
+        setIsCloudSyncing(true);
+        try {
+          await deleteCloudAccount(email);
+          if (currentUser && normalizeEmail(currentUser.email) === normalizeEmail(email)) {
+            setCurrentUserState(null);
+            setCurrentUser(null);
+            setTasks(DEFAULT_TASKS);
+            setEvents(DEFAULT_EVENTS);
+            setPomoSessions(generateInitialPomoSessions());
+            setSettings(DEFAULT_SETTINGS);
+          }
+          showToast(`Đã xóa tài khoản "${email}" khỏi hệ thống!`, 'success');
+        } catch (err) {
+          showToast('Có lỗi khi xóa tài khoản.', 'error');
+        } finally {
+          setIsCloudSyncing(false);
+        }
+      };
+
+      const clearAllAccounts = async () => {
+        setIsCloudSyncing(true);
+        try {
+          await clearAllCloudAccounts();
+          setCurrentUserState(null);
+          setCurrentUser(null);
+          setTasks(DEFAULT_TASKS);
+          setEvents(DEFAULT_EVENTS);
+          setPomoSessions(generateInitialPomoSessions());
+          setSettings(DEFAULT_SETTINGS);
+          showToast('Đã xóa toàn bộ tài khoản Gmail và làm mới ứng dụng thành công!', 'success', 4000);
+        } catch (err) {
+          showToast('Đã xóa toàn bộ bộ nhớ tài khoản trên thiết bị!', 'info');
+        } finally {
+          setIsCloudSyncing(false);
+        }
+      };
+
       const loginWithDirectGmail = (email, customName = null) => {
         if (!email || !email.includes('@')) {
           showToast('Vui lòng nhập địa chỉ email hợp lệ!', 'warning');
@@ -2548,6 +2682,8 @@
               onResetPassword={resetAccountPassword}
               onChangePassword={changeAccountPassword}
               onLogoutAccount={logoutAccount}
+              onDeleteAccount={deleteAccount}
+              onClearAllAccounts={clearAllAccounts}
               cloudSyncStatus={cloudSyncStatus}
               isCloudSyncing={isCloudSyncing}
               lastCloudSyncTime={lastCloudSyncTime}
@@ -3958,6 +4094,8 @@
       onResetPassword,
       onChangePassword,
       onLogoutAccount,
+      onDeleteAccount,
+      onClearAllAccounts,
       cloudSyncStatus,
       isCloudSyncing,
       lastCloudSyncTime,
@@ -4360,26 +4498,63 @@
 
                   {/* Detected Accounts on this Device Chips */}
                   {detectedAccounts.length > 0 && (
-                    <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800">
-                      <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 flex items-center gap-1.5">
-                        <span>🔍</span>
-                        <span>Tài khoản đã tạo trên máy này (Chạm để điền ngay):</span>
+                    <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                        <span className="flex items-center gap-1.5">
+                          <span>🔍</span>
+                          <span>Tài khoản đã tạo trên máy này:</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm('Bạn có chắc chắn muốn xóa TOÀN BỘ tài khoản Gmail đã lưu trên thiết bị này không?')) {
+                              if (onClearAllAccounts) onClearAllAccounts();
+                              setLoginEmail('');
+                              setLoginPassword('');
+                            }
+                          }}
+                          className="text-rose-500 hover:text-rose-700 hover:underline flex items-center gap-1"
+                        >
+                          <span>🗑️</span>
+                          <span>Xóa tất cả</span>
+                        </button>
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-2">
                         {detectedAccounts.map((acc, i) => (
-                          <button
+                          <div
                             key={i}
-                            type="button"
-                            onClick={() => handleSelectDetectedAccount(acc)}
-                            className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border ${
+                            className={`inline-flex items-center rounded-xl text-xs font-semibold border transition overflow-hidden ${
                               loginEmail === acc.email
                                 ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
                                 : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
                             }`}
                           >
-                            <span>📧</span>
-                            <span>{acc.email}</span>
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectDetectedAccount(acc)}
+                              className="px-2.5 py-1.5 flex items-center gap-1.5"
+                            >
+                              <span>📧</span>
+                              <span>{acc.email}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (window.confirm(`Xóa tài khoản "${acc.email}" khỏi thiết bị này?`)) {
+                                  if (onDeleteAccount) onDeleteAccount(acc.email);
+                                  if (loginEmail === acc.email) {
+                                    setLoginEmail('');
+                                    setLoginPassword('');
+                                  }
+                                }
+                              }}
+                              className="px-2 py-1.5 border-l border-black/10 dark:border-white/10 hover:bg-rose-500 hover:text-white transition"
+                              title="Xóa tài khoản này"
+                            >
+                              ✕
+                            </button>
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -4879,9 +5054,20 @@
 
             {/* Modal Footer */}
             <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center text-xs">
-              <span className="text-slate-400 font-medium">
-                {isAccountLoggedIn ? `Tài khoản: ${currentUser.email}` : 'Chế độ lưu trữ thiết bị'}
-              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm('⚠️ CẢNH BÁO: Bạn có chắc chắn muốn xóa TOÀN BỘ tài khoản Gmail đã tạo trong ứng dụng và làm mới hệ thống không? Thao tác này không thể hoàn tác!')) {
+                    if (onClearAllAccounts) onClearAllAccounts();
+                    onClose();
+                  }
+                }}
+                className="text-rose-500 hover:text-rose-700 hover:underline flex items-center gap-1 font-semibold text-[11px]"
+                title="Xóa toàn bộ tài khoản và làm mới dữ liệu"
+              >
+                <span>🗑️</span>
+                <span>Xóa toàn bộ tài khoản</span>
+              </button>
               <button
                 onClick={onClose}
                 className="px-5 py-2 rounded-xl bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900 text-xs font-bold shadow transition"

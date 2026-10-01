@@ -11,6 +11,8 @@ import {
   setUserData,
   getCurrentUser,
   setCurrentUser,
+  clearAllRegisteredAccounts,
+  deleteUserAccount,
 } from '../utils/storage';
 import { 
   registerCloudAccount, 
@@ -26,6 +28,8 @@ import {
   normalizeEmail,
   getUserCloudKey,
   subscribeToCloudEvents,
+  deleteCloudAccount,
+  clearAllCloudAccounts,
   CLOUD_STORAGE_KEYS
 } from '../utils/cloudSync';
 import { soundManager } from '../utils/audio';
@@ -498,6 +502,47 @@ export const AppProvider = ({ children }) => {
     setLastSyncTime(null);
     setCloudSyncStatus('idle');
     showToast('Đã đăng xuất tài khoản. Bạn có thể đăng nhập lại bất cứ lúc nào.', 'info');
+  }, [showToast]);
+
+  // Delete a specific account from Cloud and Local
+  const deleteAccount = useCallback(async (email) => {
+    setIsCloudSyncing(true);
+    try {
+      await deleteCloudAccount(email);
+      if (currentUser && normalizeEmail(currentUser.email) === normalizeEmail(email)) {
+        setCurrentUserState(null);
+        setCurrentUser(null);
+        setTasks(DEFAULT_TASKS);
+        setEvents(DEFAULT_CALENDAR_EVENTS);
+        setPomoSessions(generateInitialPomoSessions());
+        setSettings(DEFAULT_SETTINGS);
+      }
+      showToast(`Đã xóa tài khoản "${email}" khỏi hệ thống!`, 'success');
+    } catch (err) {
+      showToast('Có lỗi khi xóa tài khoản.', 'error');
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  }, [currentUser, showToast]);
+
+  // Permanently delete ALL Gmail accounts and wipe all data in app
+  const clearAllAccounts = useCallback(async () => {
+    setIsCloudSyncing(true);
+    try {
+      await clearAllCloudAccounts();
+      setCurrentUserState(null);
+      setCurrentUser(null);
+      setTasks(DEFAULT_TASKS);
+      setEvents(DEFAULT_CALENDAR_EVENTS);
+      setPomoSessions(generateInitialPomoSessions());
+      setSettings(DEFAULT_SETTINGS);
+      showToast('Đã xóa toàn bộ tài khoản Gmail và làm mới ứng dụng thành công!', 'success', 4000);
+    } catch (err) {
+      console.error('Clear accounts error:', err);
+      showToast('Đã xóa toàn bộ bộ nhớ tài khoản trên thiết bị!', 'info');
+    } finally {
+      setIsCloudSyncing(false);
+    }
   }, [showToast]);
 
   // Quick Device Link: Generate 1-click token for phone or another computer
@@ -1170,6 +1215,8 @@ export const AppProvider = ({ children }) => {
         resetAccountPassword,
         changeAccountPassword,
         logoutAccount,
+        deleteAccount,
+        clearAllAccounts,
         // Cloud Sync Status & Multi-Device Linking
         cloudSyncStatus,
         isCloudSyncing,

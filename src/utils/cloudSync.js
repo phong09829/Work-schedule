@@ -12,7 +12,9 @@ import {
   saveRegisteredUsers,
   findUserByEmail,
   getUserStorageKey,
-  resetUserPassword
+  resetUserPassword,
+  deleteUserAccount,
+  clearAllRegisteredAccounts
 } from './storage';
 import { DEFAULT_CALENDAR_EVENTS } from './googleCalendar';
 
@@ -1093,4 +1095,57 @@ export const exportFullBackup = (user, data) => {
   a.download = `focusflow_backup_${user?.email ? normalizeEmail(user.email).replace('@', '_') : 'guest'}_${Date.now()}.json`;
   a.click();
   URL.revokeObjectURL(url);
+};
+
+/**
+ * Permanently Delete an Account from Cloud & Local
+ */
+export const deleteCloudAccount = async (email) => {
+  const cleanEmail = normalizeEmail(email);
+  if (!cleanEmail) return false;
+  const topics = getCloudTopics(cleanEmail);
+
+  // Publish empty tombstone / deleted record to cloud topics
+  const tombstone = {
+    type: 'DELETED',
+    email: cleanEmail,
+    deletedAt: new Date().toISOString(),
+    data: null,
+    password: '',
+    passwordHash: '',
+  };
+
+  try {
+    const payload = JSON.stringify(tombstone);
+    fetch(`https://ntfy.sh/${topics.authTopic}`, { method: 'POST', body: payload, headers: { 'Title': 'FocusFlow Account Deleted', 'Priority': 'urgent' } }).catch(() => {});
+    fetch(`https://ntfy.sh/${topics.dataTopic}`, { method: 'POST', body: payload, headers: { 'Title': 'FocusFlow Data Cleared', 'Priority': 'urgent' } }).catch(() => {});
+    fetch(`https://ntfy.sh/${topics.mainTopic}`, { method: 'POST', body: payload, headers: { 'Title': 'FocusFlow Wiped', 'Priority': 'urgent' } }).catch(() => {});
+    if (topics.legacyTopic && topics.legacyTopic !== topics.mainTopic) {
+      fetch(`https://ntfy.sh/${topics.legacyTopic}`, { method: 'POST', body: payload }).catch(() => {});
+    }
+  } catch (_) {}
+
+  // Delete local record
+  deleteUserAccount(cleanEmail);
+
+  try {
+    localStorage.removeItem(`cloud_cache_${topics.mainTopic}`);
+    localStorage.removeItem(`cloud_cache_${topics.legacyTopic}`);
+  } catch (_) {}
+
+  return true;
+};
+
+/**
+ * Permanently Wipe ALL Created Gmail Accounts from Cloud & Local Browser
+ */
+export const clearAllCloudAccounts = async () => {
+  const users = getRegisteredUsers();
+  for (const u of users) {
+    if (u.email) {
+      await deleteCloudAccount(u.email);
+    }
+  }
+  clearAllRegisteredAccounts();
+  return true;
 };
