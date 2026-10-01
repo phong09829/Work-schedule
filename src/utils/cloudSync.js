@@ -331,7 +331,7 @@ export const saveToCloudRemote = async (key, data) => {
       if (!topic) return;
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
         await fetch(`https://ntfy.sh/${topic}`, {
           method: 'POST',
           body: bodyStr,
@@ -346,10 +346,10 @@ export const saveToCloudRemote = async (key, data) => {
     };
 
     const pushTasks = [
-      pushToNtfy(topics.authTopic, JSON.stringify(authData), 'FocusFlow Auth Record'),
       pushToNtfy(topics.directAuthTopic, JSON.stringify(authData), 'FocusFlow Auth Record Direct'),
-      pushToNtfy(topics.mainTopic, payload, 'FocusFlow Cloud Sync'),
+      pushToNtfy(topics.authTopic, JSON.stringify(authData), 'FocusFlow Auth Record'),
       pushToNtfy(topics.directTopic, payload, 'FocusFlow Direct Sync'),
+      pushToNtfy(topics.mainTopic, payload, 'FocusFlow Cloud Sync'),
     ];
 
     if (data.data) {
@@ -383,19 +383,36 @@ export const loadFromCloudRemote = async (key, email = null) => {
   const cleanEmail = normalizeEmail(email || (key && key.includes('@') ? key : ''));
   const topics = getCloudTopics(cleanEmail || key);
 
-  // Helper to fetch and extract latest document from a cloud topic with 1.8s timeout
-  const fetchTopicDoc = async (topicName) => {
+  // Helper to fetch and extract latest document from a cloud topic with 7s timeout
+  const fetchTopicDoc = async (topicName, timeoutMs = 7000) => {
     if (!topicName) return null;
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 1800);
-      const res = await fetch(`https://ntfy.sh/${topicName}/json?poll=1&t=${Date.now()}`, {
-        signal: controller.signal,
-        cache: 'no-cache',
-      });
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      const urls = [
+        `https://ntfy.sh/${topicName}/json?poll=1&since=all&t=${Date.now()}`,
+        `https://ntfy.sh/${topicName}/json?poll=1&t=${Date.now()}`,
+      ];
+
+      let res = null;
+      try {
+        res = await fetch(urls[0], {
+          signal: controller.signal,
+          cache: 'no-cache',
+        });
+      } catch (e) {
+        if (e.name !== 'AbortError') {
+          try {
+            res = await fetch(urls[1], {
+              signal: controller.signal,
+              cache: 'no-cache',
+            });
+          } catch (_) {}
+        }
+      }
       clearTimeout(timeoutId);
 
-      if (res.ok) {
+      if (res && res.ok) {
         const text = await res.text();
         if (text && text.trim()) {
           const lines = text.trim().split('\n').filter(Boolean);
@@ -412,8 +429,14 @@ export const loadFromCloudRemote = async (key, email = null) => {
               }
               if (item && item.attachment && item.attachment.url) {
                 try {
-                  const fileRes = await fetch(item.attachment.url);
-                  if (fileRes.ok) {
+                  const fileController = new AbortController();
+                  const fileTimeout = setTimeout(() => fileController.abort(), 6000);
+                  const fileRes = await fetch(item.attachment.url, {
+                    signal: fileController.signal,
+                    cache: 'no-cache',
+                  });
+                  clearTimeout(fileTimeout);
+                  if (fileRes && fileRes.ok) {
                     const doc = await fileRes.json();
                     if (doc && typeof doc === 'object') {
                       return doc;
@@ -431,21 +454,21 @@ export const loadFromCloudRemote = async (key, email = null) => {
 
   try {
     const fetchPromises = [
-      fetchTopicDoc(topics.authTopic),
-      fetchTopicDoc(topics.directAuthTopic),
-      fetchTopicDoc(topics.dataTopic),
-      fetchTopicDoc(topics.mainTopic),
-      fetchTopicDoc(topics.directTopic),
+      fetchTopicDoc(topics.directAuthTopic, 7000),
+      fetchTopicDoc(topics.authTopic, 7000),
+      fetchTopicDoc(topics.directTopic, 7000),
+      fetchTopicDoc(topics.dataTopic, 7000),
+      fetchTopicDoc(topics.mainTopic, 7000),
     ];
 
     if (topics.legacyTopic && topics.legacyTopic !== topics.mainTopic) {
-      fetchPromises.push(fetchTopicDoc(topics.legacyTopic));
+      fetchPromises.push(fetchTopicDoc(topics.legacyTopic, 7000));
     }
 
     if (cleanEmail) {
       const legKey = getLegacyUserCloudKey(cleanEmail);
       if (legKey && legKey !== topics.mainTopic && legKey !== topics.legacyTopic) {
-        fetchPromises.push(fetchTopicDoc(legKey));
+        fetchPromises.push(fetchTopicDoc(legKey, 7000));
       }
     }
 
