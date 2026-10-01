@@ -167,18 +167,35 @@ export const hashPassword = async (password, salt = 'focusflow_secure_salt_2026'
 };
 
 /**
- * Safe user document key in cloud database
- * Produces deterministic, safe key for phone, PC, and all devices
+ * Safe user document key and multi-channel topics in cloud database
+ * Produces deterministic, collision-free topics for phone, PC, and all devices
  */
+export const getCloudTopics = (emailOrKey) => {
+  let cleanEmail = '';
+  let hash = '';
+  if (emailOrKey && typeof emailOrKey === 'string') {
+    if (emailOrKey.includes('@')) {
+      cleanEmail = normalizeEmail(emailOrKey);
+      hash = sha256Pure(`user_cloud_ns:${cleanEmail}`).slice(0, 24);
+    } else {
+      hash = emailOrKey.replace(/^ff_auth_/, '').replace(/^ff_data_/, '').replace(/^ff_u_/, '').replace(/^ff_user_/, '').replace(/^ff_/, '');
+    }
+  }
+  return {
+    authTopic: `ff_auth_${hash}`,
+    dataTopic: `ff_data_${hash}`,
+    mainTopic: `ff_u_${hash}`,
+    legacyTopic: `ff_user_${hash}`,
+    hash,
+  };
+};
+
 export const getUserCloudKey = async (email) => {
   const clean = normalizeEmail(email);
   const hash = sha256Pure(`user_cloud_ns:${clean}`);
   return `ff_u_${hash.slice(0, 24)}`;
 };
 
-/**
- * Get legacy user cloud key for backward-compatibility lookup
- */
 export const getLegacyUserCloudKey = (email) => {
   const clean = normalizeEmail(email);
   const text = `user_id_salt:${clean}:user_id_salt`;
@@ -239,18 +256,21 @@ try {
  * Ensures ANY device (Phone, PC, Tablet) can access this account worldwide
  */
 export const saveToCloudRemote = async (key, data) => {
+  if (!data) return false;
+  const cleanEmail = normalizeEmail(data.email || (key && key.includes('@') ? key : ''));
+  const topics = getCloudTopics(cleanEmail || key);
   const payload = JSON.stringify(data);
 
-  // 1. Always save to Local Cloud Cache
+  // 1. Save to Local Cloud Cache
   try {
     localStorage.setItem(`cloud_cache_${key}`, payload);
+    localStorage.setItem(`cloud_cache_${topics.mainTopic}`, payload);
   } catch (e) {
     console.warn('Local cloud cache write warning:', e);
   }
 
   // 2. Mirror into registered users array if it contains user info
-  if (data && data.email) {
-    const cleanEmail = normalizeEmail(data.email);
+  if (cleanEmail) {
     const users = getRegisteredUsers();
     const existingIdx = users.findIndex(u => normalizeEmail(u.email) === cleanEmail);
     const userSummary = {
@@ -280,19 +300,70 @@ export const saveToCloudRemote = async (key, data) => {
     }
   } catch (_) {}
 
-  // 4. Real Global Cloud Relay Push (Multi-Device Worldwide Sync via ntfy.sh)
+  // 4. Multi-Channel Global Cloud Relay Push (Pure inline JSON - No expiring attachments)
   try {
-    const cloudTopic = `ff_${key}`;
-    await fetch(`https://ntfy.sh/${cloudTopic}`, {
+    // A. Dedicated Auth Record (100% lightweight & always instant)
+    const authData = {
+      type: 'AUTH_RECORD',
+      id: data.id,
+      email: cleanEmail,
+      name: data.name,
+      password: data.password || '',
+      passwordHash: data.passwordHash || '',
+      passwordUpdatedAt: data.passwordUpdatedAt || data.updatedAt || new Date().toISOString(),
+      avatar: data.avatar || null,
+      updatedAt: data.updatedAt || new Date().toISOString(),
+    };
+
+    fetch(`https://ntfy.sh/${topics.authTopic}`, {
+      method: 'POST',
+      body: JSON.stringify(authData),
+      headers: {
+        'Title': 'FocusFlow Auth Record',
+        'Priority': 'urgent',
+      },
+    }).catch(() => {});
+
+    // B. Dedicated Data Record (Tasks, events, pomoSessions, settings)
+    if (data.data) {
+      const dataPayload = {
+        type: 'DATA_RECORD',
+        email: cleanEmail,
+        updatedAt: data.updatedAt || new Date().toISOString(),
+        data: data.data,
+      };
+
+      fetch(`https://ntfy.sh/${topics.dataTopic}`, {
+        method: 'POST',
+        body: JSON.stringify(dataPayload),
+        headers: {
+          'Title': 'FocusFlow User Data',
+          'Priority': 'urgent',
+        },
+      }).catch(() => {});
+    }
+
+    // C. Combined Snapshot
+    fetch(`https://ntfy.sh/${topics.mainTopic}`, {
       method: 'POST',
       body: payload,
       headers: {
         'Title': 'FocusFlow Cloud Sync',
-        'Filename': 'data.json',
         'Priority': 'urgent',
-        'Tags': 'cloud_sync,focusflow'
       },
-    });
+    }).catch(() => {});
+
+    // D. Legacy Topic for older devices
+    if (topics.legacyTopic && topics.legacyTopic !== topics.mainTopic) {
+      fetch(`https://ntfy.sh/${topics.legacyTopic}`, {
+        method: 'POST',
+        body: payload,
+        headers: {
+          'Title': 'FocusFlow Cloud Sync',
+          'Priority': 'urgent',
+        },
+      }).catch(() => {});
+    }
   } catch (cloudErr) {
     console.warn('Real cloud push warning:', cloudErr);
   }
@@ -303,17 +374,20 @@ export const saveToCloudRemote = async (key, data) => {
 /**
  * Load JSON document from Global Cloud Server and Local Cloud Cache
  * Fetches latest updates from cloud server so phone gets data from PC and vice versa.
- * Supports multi-key resolution for legacy and modern accounts.
+ * Supports multi-channel parallel fetching (Auth Topic + Data Topic + Main Topic).
  */
 export const loadFromCloudRemote = async (key, email = null) => {
   let cloudRecord = null;
+  const cleanEmail = normalizeEmail(email || (key && key.includes('@') ? key : ''));
+  const topics = getCloudTopics(cleanEmail || key);
 
   // Helper to fetch and extract latest document from a cloud topic
   const fetchTopicDoc = async (topicName) => {
+    if (!topicName) return null;
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
-      const res = await fetch(`https://ntfy.sh/${topicName}/json?poll=1&since=all&t=${Date.now()}`, {
+      const timeoutId = setTimeout(() => controller.abort(), 4500);
+      const res = await fetch(`https://ntfy.sh/${topicName}/json?poll=1&t=${Date.now()}`, {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -326,22 +400,24 @@ export const loadFromCloudRemote = async (key, email = null) => {
           for (let i = lines.length - 1; i >= 0; i--) {
             try {
               const item = JSON.parse(lines[i]);
-              // 1. Check attachment payload (for large payloads > 4KB)
-              if (item && item.attachment && item.attachment.url) {
-                const fileRes = await fetch(item.attachment.url);
-                if (fileRes.ok) {
-                  const doc = await fileRes.json();
-                  if (doc && (doc.email || doc.data || doc.password || doc.passwordHash)) {
-                    return doc;
-                  }
-                }
-              }
-              // 2. Check direct inline JSON message
+              // 1. Direct inline JSON message
               if (item && item.message) {
                 try {
                   const parsedDoc = JSON.parse(item.message);
-                  if (parsedDoc && (parsedDoc.email || parsedDoc.data || parsedDoc.password || parsedDoc.passwordHash)) {
+                  if (parsedDoc && typeof parsedDoc === 'object') {
                     return parsedDoc;
+                  }
+                } catch (_) {}
+              }
+              // 2. Attachment payload fallback
+              if (item && item.attachment && item.attachment.url) {
+                try {
+                  const fileRes = await fetch(item.attachment.url);
+                  if (fileRes.ok) {
+                    const doc = await fileRes.json();
+                    if (doc && typeof doc === 'object') {
+                      return doc;
+                    }
                   }
                 } catch (_) {}
               }
@@ -350,36 +426,78 @@ export const loadFromCloudRemote = async (key, email = null) => {
         }
       }
     } catch (err) {
-      console.warn(`Cloud fetch warning for ${topicName}:`, err);
+      // Ignore network timeout/aborts
     }
     return null;
   };
 
-  // 1. Fetch from Primary Key topic (e.g. ff_ff_u_...)
-  cloudRecord = await fetchTopicDoc(`ff_${key}`);
+  try {
+    // Parallel query across Auth Topic, Data Topic, Main Topic and Legacy Topic
+    const fetchPromises = [
+      fetchTopicDoc(topics.authTopic),
+      fetchTopicDoc(topics.dataTopic),
+      fetchTopicDoc(topics.mainTopic),
+    ];
 
-  // 2. If not found and email provided, check legacy topic (e.g. ff_ff_user_...)
-  if (!cloudRecord && email) {
-    const legacyKey = getLegacyUserCloudKey(email);
-    if (legacyKey && legacyKey !== key) {
-      cloudRecord = await fetchTopicDoc(`ff_${legacyKey}`);
+    if (topics.legacyTopic && topics.legacyTopic !== topics.mainTopic) {
+      fetchPromises.push(fetchTopicDoc(topics.legacyTopic));
     }
+
+    if (cleanEmail) {
+      const legKey = getLegacyUserCloudKey(cleanEmail);
+      if (legKey && legKey !== topics.mainTopic && legKey !== topics.legacyTopic) {
+        fetchPromises.push(fetchTopicDoc(legKey));
+      }
+    }
+
+    const results = await Promise.all(fetchPromises);
+    const [authDoc, dataDoc, mainDoc, legDoc] = results;
+
+    // Merge records
+    const merged = {
+      ...(legDoc || {}),
+      ...(mainDoc || {}),
+      ...(authDoc || {}),
+    };
+
+    if (dataDoc && dataDoc.data) {
+      merged.data = dataDoc.data;
+    } else if (mainDoc && mainDoc.data) {
+      merged.data = mainDoc.data;
+    } else if (legDoc && legDoc.data) {
+      merged.data = legDoc.data;
+    }
+
+    if (authDoc && (authDoc.password || authDoc.passwordHash)) {
+      merged.password = authDoc.password || merged.password || '';
+      merged.passwordHash = authDoc.passwordHash || merged.passwordHash || '';
+      merged.passwordUpdatedAt = authDoc.passwordUpdatedAt || merged.passwordUpdatedAt;
+    }
+
+    if (merged.email || merged.password || merged.passwordHash || merged.data) {
+      cloudRecord = merged;
+    }
+  } catch (err) {
+    console.warn('Parallel cloud fetch warning:', err);
   }
 
-  // 3. If fetched from cloud, cache locally and sync user catalog
+  // If fetched from cloud, cache locally and sync user catalog
   if (cloudRecord) {
     try {
-      localStorage.setItem(`cloud_cache_${key}`, JSON.stringify(cloudRecord));
+      const jsonStr = JSON.stringify(cloudRecord);
+      localStorage.setItem(`cloud_cache_${key}`, jsonStr);
+      localStorage.setItem(`cloud_cache_${topics.mainTopic}`, jsonStr);
       if (cloudRecord.email) {
-        const cleanEmail = normalizeEmail(cloudRecord.email);
+        const uEmail = normalizeEmail(cloudRecord.email);
         const users = getRegisteredUsers();
-        const existingIdx = users.findIndex(u => normalizeEmail(u.email) === cleanEmail);
+        const existingIdx = users.findIndex(u => normalizeEmail(u.email) === uEmail);
         const userSummary = {
           id: cloudRecord.id || `usr-${Date.now()}`,
-          email: cleanEmail,
-          name: cloudRecord.name || cleanEmail.split('@')[0],
+          email: uEmail,
+          name: cloudRecord.name || uEmail.split('@')[0],
           password: cloudRecord.password || '',
           passwordHash: cloudRecord.passwordHash || '',
+          passwordUpdatedAt: cloudRecord.passwordUpdatedAt || cloudRecord.updatedAt || new Date().toISOString(),
           avatar: cloudRecord.avatar || null,
           createdAt: cloudRecord.createdAt || new Date().toISOString(),
           lastLogin: cloudRecord.lastLogin || new Date().toISOString(),
@@ -396,15 +514,15 @@ export const loadFromCloudRemote = async (key, email = null) => {
     return cloudRecord;
   }
 
-  // 4. Fallback to local cloud cache
+  // Fallback to local cloud cache
   try {
-    const cached = localStorage.getItem(`cloud_cache_${key}`);
+    const cached = localStorage.getItem(`cloud_cache_${key}`) || localStorage.getItem(`cloud_cache_${topics.mainTopic}`);
     if (cached) {
       const parsed = JSON.parse(cached);
       if (parsed) return parsed;
     }
-    if (email) {
-      const legKey = getLegacyUserCloudKey(email);
+    if (cleanEmail) {
+      const legKey = getLegacyUserCloudKey(cleanEmail);
       const legCached = localStorage.getItem(`cloud_cache_${legKey}`);
       if (legCached) {
         const parsed = JSON.parse(legCached);
@@ -420,37 +538,48 @@ export const loadFromCloudRemote = async (key, email = null) => {
  * Real-Time SSE Cloud Listener: Notifies when another device makes changes
  */
 export const subscribeToCloudEvents = (key, onUpdate) => {
-  if (typeof window === 'undefined' || !window.EventSource) return () => {};
+  if (typeof window === 'undefined' || !window.EventSource || !key) return () => {};
   try {
-    const cloudTopic = `ff_${key}`;
-    const es = new EventSource(`https://ntfy.sh/${cloudTopic}/sse`);
-    
-    es.onmessage = async (e) => {
+    const topics = getCloudTopics(key);
+    const eventSources = [];
+
+    const handleMessage = (e) => {
       try {
         const msgObj = JSON.parse(e.data);
         if (msgObj) {
-          if (msgObj.attachment && msgObj.attachment.url) {
-            const fileRes = await fetch(msgObj.attachment.url);
-            if (fileRes.ok) {
-              const doc = await fileRes.json();
-              if (doc && (doc.email || doc.data)) {
+          if (msgObj.message) {
+            try {
+              const doc = JSON.parse(msgObj.message);
+              if (doc && (doc.email || doc.data || doc.password || doc.passwordHash)) {
                 onUpdate(doc);
                 return;
               }
-            }
+            } catch (_) {}
           }
-          if (msgObj.message) {
-            const doc = JSON.parse(msgObj.message);
-            if (doc && (doc.email || doc.data)) {
-              onUpdate(doc);
-            }
+          if (msgObj.attachment && msgObj.attachment.url) {
+            fetch(msgObj.attachment.url).then(r => r.json()).then(doc => {
+              if (doc && (doc.email || doc.data)) {
+                onUpdate(doc);
+              }
+            }).catch(() => {});
           }
         }
       } catch (_) {}
     };
 
+    // Listen on both Data Topic and Main Topic
+    const esData = new EventSource(`https://ntfy.sh/${topics.dataTopic}/sse`);
+    esData.onmessage = handleMessage;
+    eventSources.push(esData);
+
+    const esMain = new EventSource(`https://ntfy.sh/${topics.mainTopic}/sse`);
+    esMain.onmessage = handleMessage;
+    eventSources.push(esMain);
+
     return () => {
-      es.close();
+      eventSources.forEach(es => {
+        try { es.close(); } catch (_) {}
+      });
     };
   } catch (e) {
     return () => {};
