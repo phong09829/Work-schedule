@@ -787,6 +787,7 @@
           createdAt: data.createdAt || new Date().toISOString(),
           lastLogin: new Date().toISOString(),
           updatedAt: data.updatedAt || new Date().toISOString(),
+        };
         if (existingIdx >= 0) users[existingIdx] = { ...users[existingIdx], ...summary };
         else users.push(summary);
         saveRegisteredUsers(users);
