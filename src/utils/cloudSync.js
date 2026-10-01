@@ -175,10 +175,15 @@ export const hashPassword = async (password, salt = 'focusflow_secure_salt_2026'
 export const getCloudTopics = (emailOrKey) => {
   let cleanEmail = '';
   let hash = '';
+  let directTopic = '';
+  let directAuthTopic = '';
   if (emailOrKey && typeof emailOrKey === 'string') {
     if (emailOrKey.includes('@')) {
       cleanEmail = normalizeEmail(emailOrKey);
       hash = sha256Pure(`user_cloud_ns:${cleanEmail}`).slice(0, 24);
+      const safe = cleanEmail.replace(/[^a-z0-9]/g, '_').slice(0, 40);
+      directTopic = `ff_em_${safe}`;
+      directAuthTopic = `ff_ema_${safe}`;
     } else {
       hash = emailOrKey.replace(/^ff_auth_/, '').replace(/^ff_data_/, '').replace(/^ff_u_/, '').replace(/^ff_user_/, '').replace(/^ff_/, '');
     }
@@ -188,6 +193,8 @@ export const getCloudTopics = (emailOrKey) => {
     dataTopic: `ff_data_${hash}`,
     mainTopic: `ff_u_${hash}`,
     legacyTopic: `ff_user_${hash}`,
+    directTopic: directTopic || `ff_em_${hash}`,
+    directAuthTopic: directAuthTopic || `ff_ema_${hash}`,
     hash,
   };
 };
@@ -267,6 +274,9 @@ export const saveToCloudRemote = async (key, data) => {
   try {
     localStorage.setItem(`cloud_cache_${key}`, payload);
     localStorage.setItem(`cloud_cache_${topics.mainTopic}`, payload);
+    if (topics.directTopic) {
+      localStorage.setItem(`cloud_cache_${topics.directTopic}`, payload);
+    }
   } catch (e) {
     console.warn('Local cloud cache write warning:', e);
   }
@@ -281,6 +291,7 @@ export const saveToCloudRemote = async (key, data) => {
       name: data.name || cleanEmail.split('@')[0],
       password: data.password || '',
       passwordHash: data.passwordHash || '',
+      passwordUpdatedAt: data.passwordUpdatedAt || data.updatedAt || new Date().toISOString(),
       avatar: data.avatar || null,
       createdAt: data.createdAt || new Date().toISOString(),
       lastLogin: new Date().toISOString(),
@@ -302,9 +313,8 @@ export const saveToCloudRemote = async (key, data) => {
     }
   } catch (_) {}
 
-  // 4. Multi-Channel Global Cloud Relay Push (Pure inline JSON - No expiring attachments)
+  // 4. Guaranteed Multi-Channel Global Cloud Relay Push (with AWAIT & Retry)
   try {
-    // A. Dedicated Auth Record (100% lightweight & always instant)
     const authData = {
       type: 'AUTH_RECORD',
       id: data.id,
@@ -317,16 +327,39 @@ export const saveToCloudRemote = async (key, data) => {
       updatedAt: data.updatedAt || new Date().toISOString(),
     };
 
-    fetch(`https://ntfy.sh/${topics.authTopic}`, {
-      method: 'POST',
-      body: JSON.stringify(authData),
-      headers: {
-        'Title': 'FocusFlow Auth Record',
-        'Priority': 'urgent',
-      },
-    }).catch(() => {});
+    const pushToNtfy = async (topic, bodyStr, title) => {
+      if (!topic) return;
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        await fetch(`https://ntfy.sh/${topic}`, {
+          method: 'POST',
+          body: bodyStr,
+          headers: {
+            'Title': title,
+            'Priority': 'urgent',
+          },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+      } catch (err) {
+        try {
+          await fetch(`https://ntfy.sh/${topic}`, {
+            method: 'POST',
+            body: bodyStr,
+            headers: { 'Title': title, 'Priority': 'urgent' },
+          });
+        } catch (_) {}
+      }
+    };
 
-    // B. Dedicated Data Record (Tasks, events, pomoSessions, settings)
+    const pushTasks = [
+      pushToNtfy(topics.authTopic, JSON.stringify(authData), 'FocusFlow Auth Record'),
+      pushToNtfy(topics.directAuthTopic, JSON.stringify(authData), 'FocusFlow Auth Record Direct'),
+      pushToNtfy(topics.mainTopic, payload, 'FocusFlow Cloud Sync'),
+      pushToNtfy(topics.directTopic, payload, 'FocusFlow Direct Sync'),
+    ];
+
     if (data.data) {
       const dataPayload = {
         type: 'DATA_RECORD',
@@ -334,38 +367,14 @@ export const saveToCloudRemote = async (key, data) => {
         updatedAt: data.updatedAt || new Date().toISOString(),
         data: data.data,
       };
-
-      fetch(`https://ntfy.sh/${topics.dataTopic}`, {
-        method: 'POST',
-        body: JSON.stringify(dataPayload),
-        headers: {
-          'Title': 'FocusFlow User Data',
-          'Priority': 'urgent',
-        },
-      }).catch(() => {});
+      pushTasks.push(pushToNtfy(topics.dataTopic, JSON.stringify(dataPayload), 'FocusFlow User Data'));
     }
 
-    // C. Combined Snapshot
-    fetch(`https://ntfy.sh/${topics.mainTopic}`, {
-      method: 'POST',
-      body: payload,
-      headers: {
-        'Title': 'FocusFlow Cloud Sync',
-        'Priority': 'urgent',
-      },
-    }).catch(() => {});
-
-    // D. Legacy Topic for older devices
     if (topics.legacyTopic && topics.legacyTopic !== topics.mainTopic) {
-      fetch(`https://ntfy.sh/${topics.legacyTopic}`, {
-        method: 'POST',
-        body: payload,
-        headers: {
-          'Title': 'FocusFlow Cloud Sync',
-          'Priority': 'urgent',
-        },
-      }).catch(() => {});
+      pushTasks.push(pushToNtfy(topics.legacyTopic, payload, 'FocusFlow Cloud Sync'));
     }
+
+    await Promise.allSettled(pushTasks);
   } catch (cloudErr) {
     console.warn('Real cloud push warning:', cloudErr);
   }
@@ -388,9 +397,10 @@ export const loadFromCloudRemote = async (key, email = null) => {
     if (!topicName) return null;
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4500);
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
       const res = await fetch(`https://ntfy.sh/${topicName}/json?poll=1&t=${Date.now()}`, {
         signal: controller.signal,
+        cache: 'no-cache',
       });
       clearTimeout(timeoutId);
 
@@ -434,11 +444,13 @@ export const loadFromCloudRemote = async (key, email = null) => {
   };
 
   try {
-    // Parallel query across Auth Topic, Data Topic, Main Topic and Legacy Topic
+    // Parallel query across Auth Topics, Data Topic, Main Topic and Legacy Topic
     const fetchPromises = [
       fetchTopicDoc(topics.authTopic),
+      fetchTopicDoc(topics.directAuthTopic),
       fetchTopicDoc(topics.dataTopic),
       fetchTopicDoc(topics.mainTopic),
+      fetchTopicDoc(topics.directTopic),
     ];
 
     if (topics.legacyTopic && topics.legacyTopic !== topics.mainTopic) {
@@ -452,28 +464,24 @@ export const loadFromCloudRemote = async (key, email = null) => {
       }
     }
 
-    const results = await Promise.all(fetchPromises);
-    const [authDoc, dataDoc, mainDoc, legDoc] = results;
+    const results = await Promise.allSettled(fetchPromises);
+    const docs = results.filter(r => r.status === 'fulfilled' && r.value).map(r => r.value);
 
-    // Merge records
-    const merged = {
-      ...(legDoc || {}),
-      ...(mainDoc || {}),
-      ...(authDoc || {}),
-    };
-
-    if (dataDoc && dataDoc.data) {
-      merged.data = dataDoc.data;
-    } else if (mainDoc && mainDoc.data) {
-      merged.data = mainDoc.data;
-    } else if (legDoc && legDoc.data) {
-      merged.data = legDoc.data;
-    }
-
-    if (authDoc && (authDoc.password || authDoc.passwordHash)) {
-      merged.password = authDoc.password || merged.password || '';
-      merged.passwordHash = authDoc.passwordHash || merged.passwordHash || '';
-      merged.passwordUpdatedAt = authDoc.passwordUpdatedAt || merged.passwordUpdatedAt;
+    let merged = {};
+    for (const doc of docs) {
+      if (!doc || typeof doc !== 'object') continue;
+      merged = {
+        ...merged,
+        ...doc,
+      };
+      if (doc.data) {
+        merged.data = doc.data;
+      }
+      if (doc.password || doc.passwordHash) {
+        merged.password = doc.password || merged.password || '';
+        merged.passwordHash = doc.passwordHash || merged.passwordHash || '';
+        merged.passwordUpdatedAt = doc.passwordUpdatedAt || merged.passwordUpdatedAt;
+      }
     }
 
     if (merged.email || merged.password || merged.passwordHash || merged.data) {
@@ -489,6 +497,9 @@ export const loadFromCloudRemote = async (key, email = null) => {
       const jsonStr = JSON.stringify(cloudRecord);
       localStorage.setItem(`cloud_cache_${key}`, jsonStr);
       localStorage.setItem(`cloud_cache_${topics.mainTopic}`, jsonStr);
+      if (topics.directTopic) {
+        localStorage.setItem(`cloud_cache_${topics.directTopic}`, jsonStr);
+      }
       if (cloudRecord.email) {
         const uEmail = normalizeEmail(cloudRecord.email);
         const users = getRegisteredUsers();
@@ -518,7 +529,9 @@ export const loadFromCloudRemote = async (key, email = null) => {
 
   // Fallback to local cloud cache
   try {
-    const cached = localStorage.getItem(`cloud_cache_${key}`) || localStorage.getItem(`cloud_cache_${topics.mainTopic}`);
+    const cached = localStorage.getItem(`cloud_cache_${key}`) ||
+      localStorage.getItem(`cloud_cache_${topics.mainTopic}`) ||
+      (topics.directTopic ? localStorage.getItem(`cloud_cache_${topics.directTopic}`) : null);
     if (cached) {
       const parsed = JSON.parse(cached);
       if (parsed) return parsed;
@@ -711,6 +724,10 @@ export const loginCloudAccount = async ({ email, password }) => {
   // 1. Fetch authoritative record from Cloud Server (Multi-device master source)
   try {
     userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
+    if (!userRecord || (!userRecord.password && !userRecord.passwordHash)) {
+      await new Promise(r => setTimeout(r, 600));
+      userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
+    }
   } catch (err) {
     console.warn('Cloud login fetch error:', err);
   }
