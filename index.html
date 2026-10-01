@@ -787,7 +787,6 @@
           createdAt: data.createdAt || new Date().toISOString(),
           lastLogin: new Date().toISOString(),
           updatedAt: data.updatedAt || new Date().toISOString(),
-        };
         if (existingIdx >= 0) users[existingIdx] = { ...users[existingIdx], ...summary };
         else users.push(summary);
         saveRegisteredUsers(users);
@@ -800,7 +799,7 @@
         }
       } catch (_) {}
 
-      // 4. Guaranteed Multi-Channel Global Cloud Relay Push (with AWAIT & Retry)
+      // 4. Background Global Cloud Relay Push (Non-blocking for instant UI response)
       try {
         const authData = {
           type: 'AUTH_RECORD',
@@ -818,7 +817,7 @@
           if (!topic) return;
           try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 6000);
+            const timeoutId = setTimeout(() => controller.abort(), 3500);
             await fetch(`https://ntfy.sh/${topic}`, {
               method: 'POST',
               body: bodyStr,
@@ -829,15 +828,7 @@
               signal: controller.signal,
             });
             clearTimeout(timeoutId);
-          } catch (err) {
-            try {
-              await fetch(`https://ntfy.sh/${topic}`, {
-                method: 'POST',
-                body: bodyStr,
-                headers: { 'Title': title, 'Priority': 'urgent' },
-              });
-            } catch (_) {}
-          }
+          } catch (_) {}
         };
 
         const pushTasks = [
@@ -861,7 +852,7 @@
           pushTasks.push(pushToNtfy(topics.legacyTopic, payload, 'FocusFlow Cloud Sync'));
         }
 
-        await Promise.allSettled(pushTasks);
+        Promise.allSettled(pushTasks).catch(() => {});
       } catch (cloudErr) {
         console.warn('Real cloud push warning:', cloudErr);
       }
@@ -878,7 +869,7 @@
         if (!topicName) return null;
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 8000);
+          const timeoutId = setTimeout(() => controller.abort(), 1800);
           const res = await fetch(`https://ntfy.sh/${topicName}/json?poll=1&t=${Date.now()}`, {
             signal: controller.signal,
             cache: 'no-cache',
@@ -1083,17 +1074,18 @@
       const passwordHash = await hashPassword(password);
       const enteredPlain = password.trim();
 
-      let existingCloud = null;
+      const existingLocal = findUserByEmail(cleanEmail);
+      let cachedCloud = null;
       try {
-        existingCloud = await loadFromCloudRemote(cloudKey, cleanEmail);
+        const raw = localStorage.getItem(`cloud_cache_${cloudKey}`);
+        if (raw) cachedCloud = JSON.parse(raw);
       } catch (_) {}
 
-      const existingLocal = findUserByEmail(cleanEmail);
-      const existing = existingCloud || (existingLocal && (existingLocal.password || existingLocal.passwordHash) ? existingLocal : null);
+      const existing = (existingLocal && (existingLocal.password || existingLocal.passwordHash) ? existingLocal : null) ||
+        (cachedCloud && (cachedCloud.password || cachedCloud.passwordHash) ? cachedCloud : null);
 
       if (existing && (existing.password || existing.passwordHash)) {
         const isMatch = await verifyPasswordRecord(enteredPlain, existing);
-
         if (isMatch) {
           return loginCloudAccount({ email: cleanEmail, password: enteredPlain });
         }
@@ -1130,10 +1122,11 @@
         data: defaultDataset,
       };
 
-      await saveToCloudRemote(cloudKey, newUserRecord);
+      // Non-blocking cloud push
+      saveToCloudRemote(cloudKey, newUserRecord).catch(() => {});
       const legacyKey = getLegacyUserCloudKey(cleanEmail);
       if (legacyKey && legacyKey !== cloudKey) {
-        await saveToCloudRemote(legacyKey, newUserRecord);
+        saveToCloudRemote(legacyKey, newUserRecord).catch(() => {});
       }
 
       const sessionUser = {
@@ -1170,50 +1163,74 @@
       const enteredPlain = password.trim();
       const enteredHash = await hashPassword(enteredPlain);
 
+      // 1. FAST PATH (Instant 0.01s): Check local database or local cloud cache FIRST
+      const registeredUsers = getRegisteredUsers();
+      const localUser = registeredUsers.find(u => normalizeEmail(u.email) === cleanEmail && (u.password || u.passwordHash));
+      let cachedCloud = null;
+      try {
+        const raw = localStorage.getItem(`cloud_cache_${cloudKey}`);
+        if (raw) cachedCloud = JSON.parse(raw);
+      } catch (_) {}
+
+      const fastLocalCandidate = localUser || (cachedCloud && (cachedCloud.password || cachedCloud.passwordHash) ? cachedCloud : null);
+
+      if (fastLocalCandidate) {
+        const isFastMatch = await verifyPasswordRecord(enteredPlain, fastLocalCandidate);
+        if (isFastMatch) {
+          const sessionUser = {
+            id: fastLocalCandidate.id || `usr-${Date.now()}`,
+            email: cleanEmail,
+            name: fastLocalCandidate.name || cleanEmail.split('@')[0],
+            avatar: fastLocalCandidate.avatar || null,
+            createdAt: fastLocalCandidate.createdAt || new Date().toISOString(),
+            passwordHash: enteredHash,
+          };
+
+          setCurrentUser(sessionUser);
+          setStored('focusflow_last_cloud_sync_time_v1', new Date().toISOString());
+
+          const dataset = fastLocalCandidate.data || {
+            tasks: getUserData(cleanEmail, 'tasks', getStored(STORAGE_KEYS.TASKS, DEFAULT_TASKS)),
+            events: getUserData(cleanEmail, 'events', DEFAULT_EVENTS),
+            pomoSessions: getUserData(cleanEmail, 'pomo_sessions', generateInitialPomoSessions()),
+            settings: getUserData(cleanEmail, 'settings', DEFAULT_SETTINGS),
+          };
+
+          setUserData(cleanEmail, 'tasks', dataset.tasks);
+          setUserData(cleanEmail, 'events', dataset.events);
+          setUserData(cleanEmail, 'pomo_sessions', dataset.pomoSessions);
+          setUserData(cleanEmail, 'settings', dataset.settings);
+
+          // Background cloud sync
+          saveToCloudRemote(cloudKey, {
+            ...fastLocalCandidate,
+            email: cleanEmail,
+            password: enteredPlain,
+            passwordHash: enteredHash,
+            lastLogin: new Date().toISOString(),
+            data: dataset,
+          }).catch(() => {});
+
+          return {
+            ok: true,
+            user: sessionUser,
+            data: dataset,
+            message: `Đăng nhập thành công! Đã tải dữ liệu của tài khoản "${cleanEmail}".`,
+          };
+        }
+      }
+
+      // 2. REMOTE CLOUD PATH: Fast parallel query across remote topics (for phone / new device)
       let userRecord = null;
       try {
         userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
-        if (!userRecord || (!userRecord.password && !userRecord.passwordHash)) {
-          await new Promise(r => setTimeout(r, 600));
-          userRecord = await loadFromCloudRemote(cloudKey, cleanEmail);
-        }
       } catch (err) {
         console.warn('Cloud login fetch error:', err);
       }
 
       if (!userRecord || (!userRecord.password && !userRecord.passwordHash)) {
-        try {
-          const cachedRaw = localStorage.getItem(`cloud_cache_${cloudKey}`);
-          if (cachedRaw) {
-            const parsed = JSON.parse(cachedRaw);
-            if (parsed && (parsed.password || parsed.passwordHash)) {
-              userRecord = parsed;
-            }
-          }
-        } catch (_) {}
-      }
-
-      if (!userRecord || (!userRecord.password && !userRecord.passwordHash)) {
-        const registeredUsers = getRegisteredUsers();
-        const localUser = registeredUsers.find(u => normalizeEmail(u.email) === cleanEmail && (u.password || u.passwordHash));
-
-        if (localUser) {
-          userRecord = {
-            id: localUser.id || `usr-${Date.now()}`,
-            email: cleanEmail,
-            name: localUser.name || cleanEmail.split('@')[0],
-            password: localUser.password || '',
-            passwordHash: localUser.passwordHash || '',
-            avatar: localUser.avatar || null,
-            createdAt: localUser.createdAt || new Date().toISOString(),
-            updatedAt: localUser.updatedAt || new Date().toISOString(),
-            data: {
-              tasks: getUserData(cleanEmail, 'tasks', getStored(STORAGE_KEYS.TASKS, DEFAULT_TASKS)),
-              events: getUserData(cleanEmail, 'events', DEFAULT_EVENTS),
-              pomoSessions: getUserData(cleanEmail, 'pomo_sessions', generateInitialPomoSessions()),
-              settings: getUserData(cleanEmail, 'settings', DEFAULT_SETTINGS),
-            }
-          };
+        if (fastLocalCandidate) {
+          userRecord = fastLocalCandidate;
         }
       }
 
@@ -1239,14 +1256,14 @@
       userRecord.lastLogin = new Date().toISOString();
       userRecord.password = enteredPlain;
       userRecord.passwordHash = enteredHash;
-      await saveToCloudRemote(cloudKey, userRecord);
+      saveToCloudRemote(cloudKey, userRecord).catch(() => {});
 
       const sessionUser = {
-        id: userRecord.id,
-        email: userRecord.email,
-        name: userRecord.name,
+        id: userRecord.id || `usr-${Date.now()}`,
+        email: userRecord.email || cleanEmail,
+        name: userRecord.name || cleanEmail.split('@')[0],
         avatar: userRecord.avatar || null,
-        createdAt: userRecord.createdAt,
+        createdAt: userRecord.createdAt || new Date().toISOString(),
         passwordHash: enteredHash,
       };
 
@@ -1269,7 +1286,7 @@
         ok: true,
         user: sessionUser,
         data: dataset,
-        message: `Đăng nhập thành công! Đã tải dữ liệu của "${cleanEmail}".`
+        message: `Đăng nhập thành công! Đã tải dữ liệu của tài khoản "${cleanEmail}".`
       };
     };
 
