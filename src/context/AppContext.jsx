@@ -616,6 +616,7 @@ export const AppProvider = ({ children }) => {
 
   // Google OAuth GIS Login Handler
   const handleGoogleLoginSuccess = useCallback(async (tokenResponse) => {
+    setIsCloudSyncing(true);
     try {
       const accessToken = tokenResponse.access_token;
       const expiresIn = tokenResponse.expires_in || 3599;
@@ -627,32 +628,64 @@ export const AppProvider = ({ children }) => {
       };
 
       setGoogleToken(tokenObj);
+      setStoredData(GOOGLE_STORAGE_KEYS.AUTH_TOKEN, tokenObj);
 
-      // Fetch Profile
+      // 1. Fetch Profile from Google UserInfo
       const profile = await fetchGoogleUserProfile(accessToken);
       setGoogleUser(profile);
+      setStoredData(GOOGLE_STORAGE_KEYS.USER_PROFILE, profile);
 
       const cleanEmail = normalizeEmail(profile.email);
       const activeSession = {
         id: profile.id,
-        name: profile.name,
+        name: profile.name || cleanEmail.split('@')[0],
         email: cleanEmail,
-        avatar: profile.picture,
+        avatar: profile.picture || null,
         provider: 'google',
       };
+
+      // 2. Load account cloud data or auto-register on cloud
+      try {
+        const cloudRes = await loginCloudAccount({ email: cleanEmail, password: 'google_oauth_pass' });
+        if (cloudRes && cloudRes.ok && cloudRes.data) {
+          const data = cloudRes.data;
+          if (data.events && Array.isArray(data.events)) setEvents(data.events);
+          if (data.tasks && Array.isArray(data.tasks)) setTasks(data.tasks);
+          if (data.pomoSessions && Array.isArray(data.pomoSessions)) setPomoSessions(data.pomoSessions);
+          if (data.settings) setSettings(data.settings);
+        } else {
+          await registerAccount({
+            email: cleanEmail,
+            password: 'google_oauth_pass',
+            name: profile.name,
+          });
+        }
+      } catch (cloudErr) {
+        console.warn('Cloud account load warning:', cloudErr);
+      }
+
       setCurrentUser(activeSession);
       setCurrentUserState(activeSession);
+      setCloudSyncStatus('synced');
+      setLastCloudSyncTime(new Date().toISOString());
 
-      showToast(`Chào mừng ${profile.name}! Đã kết nối Google và kích hoạt đồng bộ đám mây.`, 'success');
+      // 3. Switch straight to Schedule (Calendar)
+      setActiveTab('calendar');
 
-      // Sync Cloud & Google Calendar
+      showToast(`🎉 Đăng nhập Google thành công! Chào mừng ${profile.name || cleanEmail} vào tài khoản Schedule.`, 'success', 5000);
+
+      // 4. Sync Cloud & Google Calendar
       triggerCloudSync();
       syncWithGoogleCalendar(accessToken);
+      return true;
     } catch (err) {
       console.error('Google login error:', err);
       showToast('Đăng nhập Google thất bại hoặc không thể lấy hồ sơ người dùng.', 'error');
+      return false;
+    } finally {
+      setIsCloudSyncing(false);
     }
-  }, [showToast, triggerCloudSync]);
+  }, [showToast, triggerCloudSync, setActiveTab, registerAccount, syncWithGoogleCalendar]);
 
   // Persist Events to Active User Storage and Fallback
   useEffect(() => {

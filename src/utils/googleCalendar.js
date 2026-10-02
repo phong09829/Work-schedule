@@ -123,6 +123,64 @@ export const formatForDateTimeInput = (date) => {
 };
 
 /**
+ * Load Google Identity Services (GIS) library dynamically if not loaded
+ */
+export const loadGoogleIdentityServicesScript = () => {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      reject(new Error('Window not available'));
+      return;
+    }
+    if (window.google?.accounts?.oauth2) {
+      resolve(window.google);
+      return;
+    }
+    const existing = document.getElementById('google-gsi-client');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.google));
+      existing.addEventListener('error', reject);
+      return;
+    }
+    const script = document.createElement('script');
+    script.id = 'google-gsi-client';
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve(window.google);
+    script.onerror = (err) => reject(new Error('Không thể tải thư viện Google Identity Services.'));
+    document.head.appendChild(script);
+  });
+};
+
+/**
+ * Initiate Google OAuth popup flow
+ */
+export const initiateGoogleOAuthLogin = async ({ clientId, onSuccess, onError }) => {
+  try {
+    await loadGoogleIdentityServicesScript();
+    if (!window.google?.accounts?.oauth2) {
+      throw new Error('Google Identity Services chưa sẵn sàng.');
+    }
+
+    const tokenClient = window.google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: GOOGLE_SCOPES,
+      callback: (tokenResponse) => {
+        if (tokenResponse.error) {
+          if (onError) onError(tokenResponse);
+          return;
+        }
+        if (onSuccess) onSuccess(tokenResponse);
+      },
+    });
+
+    tokenClient.requestAccessToken({ prompt: 'consent' });
+  } catch (error) {
+    if (onError) onError(error);
+  }
+};
+
+/**
  * Fetch Google User Profile using OAuth 2.0 access token
  */
 export const fetchGoogleUserProfile = async (accessToken) => {

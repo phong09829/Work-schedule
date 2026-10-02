@@ -49,6 +49,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.10/babel.min.js" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/canvas-confetti/1.9.2/confetti.browser.min.js" crossorigin="anonymous"></script>
+  <!-- Google Identity Services (GIS) OAuth 2.0 Client -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 
   <!-- Fallback Script Loader if CDNJS is blocked -->
   <script>
@@ -2229,14 +2231,57 @@
 
       const handleGoogleLoginSuccess = async (response) => {
         try {
+          setIsCloudSyncing(true);
           const accessToken = response.access_token;
-          setGoogleToken({ access_token: accessToken, expires_at: Date.now() + 3600000, provider: 'google_oauth' });
+          const tokenObj = { access_token: accessToken, expires_at: Date.now() + 3600000, provider: 'google_oauth' };
+          setGoogleToken(tokenObj);
+          
           const profile = await fetchGoogleUserProfile(accessToken);
           setGoogleUser(profile);
-          showToast(`Chào mừng ${profile.name}! Đã kết nối Google Calendar.`, 'success');
+
+          const cleanEmail = normalizeEmail(profile.email);
+          const activeSession = {
+            id: profile.id,
+            name: profile.name || cleanEmail.split('@')[0],
+            email: cleanEmail,
+            avatar: profile.picture || null,
+            provider: 'google',
+          };
+
+          try {
+            const cloudRes = await loginCloudAccount({ email: cleanEmail, password: 'google_oauth_pass' });
+            if (cloudRes && cloudRes.ok && cloudRes.data) {
+              const data = cloudRes.data;
+              if (data.events && Array.isArray(data.events)) setEvents(data.events);
+              if (data.tasks && Array.isArray(data.tasks)) setTasks(data.tasks);
+              if (data.pomoSessions && Array.isArray(data.pomoSessions)) setPomoSessions(data.pomoSessions);
+              if (data.settings) setSettings(data.settings);
+            } else {
+              await registerAccount({
+                email: cleanEmail,
+                password: 'google_oauth_pass',
+                name: profile.name,
+              });
+            }
+          } catch (cloudErr) {
+            console.warn('Cloud account load warning:', cloudErr);
+          }
+
+          setCurrentUser(activeSession);
+          setCurrentUserState(activeSession);
+          setCloudSyncStatus('synced');
+          setLastCloudSyncTime(new Date().toISOString());
+
+          setActiveTab('calendar');
+          showToast(`🎉 Đăng nhập Google thành công! Chào mừng ${profile.name || cleanEmail} vào tài khoản Schedule.`, 'success', 5000);
           syncWithGoogleCalendar(accessToken);
+          return true;
         } catch (e) {
-          showToast('Đăng nhập Google thất bại.', 'error');
+          console.error('Google login error:', e);
+          showToast('Đăng nhập Google thất bại hoặc không thể lấy hồ sơ người dùng.', 'error');
+          return false;
+        } finally {
+          setIsCloudSyncing(false);
         }
       };
 
@@ -4147,6 +4192,8 @@
       tasks = [],
       pomoSessions = [],
       settings = {},
+      clientId,
+      onSaveClientId,
       onLoginSuccess,
       showToast
     }) {
@@ -4163,7 +4210,11 @@
       const [loginPassword, setLoginPassword] = useState('');
       const [showLoginPassword, setShowLoginPassword] = useState(false);
       const [isSubmitting, setIsSubmitting] = useState(false);
+      const [isGoogleLoading, setIsGoogleLoading] = useState(false);
       const [loginErrorState, setLoginErrorState] = useState(null);
+
+      // Google Setup State
+      const [inputClientId, setInputClientId] = useState(clientId || settings?.googleClientId || '');
 
       // Register Form State
       const [regName, setRegName] = useState('');
@@ -4282,26 +4333,83 @@
       };
 
       const handleGoogleLogin = async () => {
-        if (window.google?.accounts?.oauth2 && onLoginSuccess) {
+        const activeCid = clientId || settings?.googleClientId || localStorage.getItem('focusflow_google_client_id_v1') || '';
+        
+        if (activeCid && activeCid.trim()) {
+          setIsGoogleLoading(true);
+          showToast('Đang mở cửa sổ đăng nhập Google...', 'info', 3000);
           try {
-            const client = window.google.accounts.oauth2.initTokenClient({
-              client_id: settings?.googleClientId || 'YOUR_GOOGLE_CLIENT_ID',
+            if (!window.google?.accounts?.oauth2) {
+              throw new Error('Đang tải Google Identity Services... Vui lòng thử lại sau 2 giây.');
+            }
+            const tokenClient = window.google.accounts.oauth2.initTokenClient({
+              client_id: activeCid.trim(),
               scope: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
-              callback: (res) => {
-                if (res.access_token) {
-                  onLoginSuccess(res);
-                  onClose();
+              callback: async (res) => {
+                setIsGoogleLoading(false);
+                if (res.error) {
+                  showToast('Chưa hoàn tất phê duyệt tài khoản Google hoặc đã đóng cửa sổ.', 'warning');
+                  return;
+                }
+                if (res.access_token && onLoginSuccess) {
+                  const ok = await onLoginSuccess(res);
+                  if (ok) onClose();
                 }
               }
             });
-            client.requestAccessToken();
-            return;
+            tokenClient.requestAccessToken({ prompt: 'consent' });
           } catch(e) {
-            console.warn('GIS error:', e);
+            setIsGoogleLoading(false);
+            showToast(e.message || 'Lỗi mở Google OAuth', 'error');
           }
+          return;
         }
 
-        const email = prompt('Nhập địa chỉ Gmail của bạn để đăng nhập:', loginEmail || '');
+        setInputClientId(activeCid);
+        setActiveTab('google_setup');
+      };
+
+      const handleSaveClientIdAndAuth = async (e) => {
+        if (e) e.preventDefault();
+        const cid = inputClientId.trim();
+        if (!cid) {
+          showToast('Vui lòng nhập Google Client ID của bạn!', 'warning');
+          return;
+        }
+
+        if (onSaveClientId) onSaveClientId(cid);
+        localStorage.setItem('focusflow_google_client_id_v1', cid);
+
+        setIsGoogleLoading(true);
+        showToast('Đang mở cửa sổ phê duyệt Google...', 'info', 3000);
+        try {
+          if (!window.google?.accounts?.oauth2) {
+            throw new Error('Google Identity Services chưa sẵn sàng.');
+          }
+          const tokenClient = window.google.accounts.oauth2.initTokenClient({
+            client_id: cid,
+            scope: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
+            callback: async (res) => {
+              setIsGoogleLoading(false);
+              if (res.error) {
+                showToast('Chưa duyệt cấp quyền Google hoặc đã đóng cửa sổ.', 'warning');
+                return;
+              }
+              if (res.access_token && onLoginSuccess) {
+                const ok = await onLoginSuccess(res);
+                if (ok) onClose();
+              }
+            }
+          });
+          tokenClient.requestAccessToken({ prompt: 'consent' });
+        } catch(e) {
+          setIsGoogleLoading(false);
+          showToast(e.message || 'Lỗi mở Google OAuth', 'error');
+        }
+      };
+
+      const handleDirectGmailQuickLogin = async () => {
+        const email = prompt('Nhập địa chỉ Gmail của bạn để đăng nhập ngay vào Schedule:', loginEmail || '');
         if (email && email.trim() && email.includes('@')) {
           setIsSubmitting(true);
           try {
@@ -4497,7 +4605,7 @@
                     {/* Submit Button */}
                     <button
                       type="submit"
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || isGoogleLoading}
                       className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 hover:from-blue-500 hover:to-cyan-300 text-white font-bold text-sm sm:text-base shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-70 mt-2 cursor-pointer"
                     >
                       {isSubmitting ? (
@@ -4523,16 +4631,26 @@
                   {/* Google Login Button */}
                   <button
                     type="button"
+                    disabled={isGoogleLoading || isSubmitting}
                     onClick={handleGoogleLogin}
-                    className="w-full py-3 px-4 rounded-xl bg-[#131E34] hover:bg-[#1A2845] border border-slate-700/60 flex items-center justify-center gap-3 text-slate-200 font-semibold text-xs sm:text-sm transition-all shadow-sm cursor-pointer"
+                    className="w-full py-3 px-4 rounded-xl bg-[#131E34] hover:bg-[#1A2845] border border-slate-700/60 flex items-center justify-center gap-3 text-slate-200 font-semibold text-xs sm:text-sm transition-all shadow-sm cursor-pointer disabled:opacity-60"
                   >
-                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-                    </svg>
-                    <span>Đăng nhập bằng Google</span>
+                    {isGoogleLoading ? (
+                      <>
+                        <span>🔄</span>
+                        <span className="text-cyan-300 font-bold">Đang mở Google & Chờ duyệt...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                        </svg>
+                        <span>Đăng nhập bằng Google</span>
+                      </>
+                    )}
                   </button>
 
                   {/* Bottom Switch Link */}
@@ -4552,7 +4670,84 @@
                 </div>
               )}
 
-              {/* ===================== VIEW 2: REGISTER ===================== */}
+              {/* ===================== VIEW 2: GOOGLE CLIENT ID SETUP ===================== */}
+              {activeTab === 'google_setup' && (
+                <div>
+                  <div className="w-14 h-14 rounded-2xl bg-[#132A45] border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-500/15 mx-auto">
+                    <svg className="w-7 h-7" viewBox="0 0 24 24">
+                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                    </svg>
+                  </div>
+
+                  <h2 className="text-2xl font-extrabold text-white text-center mt-4 tracking-tight">
+                    Đăng Nhập Google OAuth
+                  </h2>
+                  <p className="text-xs text-slate-400 text-center mt-1.5 mb-5 leading-relaxed">
+                    Truy cập trực tiếp vào Google, đăng nhập tài khoản Gmail của bạn và phê duyệt quyền để mở thẳng tài khoản Schedule.
+                  </p>
+
+                  <form onSubmit={handleSaveClientIdAndAuth} className="space-y-4">
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                        GOOGLE CLIENT ID (OAuth 2.0 Web Client)
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={inputClientId}
+                        onChange={(e) => setInputClientId(e.target.value)}
+                        placeholder="VD: 123456789-abcdef.apps.googleusercontent.com"
+                        className="w-full px-3.5 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs font-mono text-white placeholder-slate-500 focus:outline-none transition"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        💡 Lấy Client ID từ <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-cyan-400 hover:underline">Google Cloud Console ↗</a>
+                      </p>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isGoogleLoading}
+                      className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 hover:from-blue-500 hover:to-cyan-300 text-white font-bold text-xs sm:text-sm shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-70 cursor-pointer"
+                    >
+                      {isGoogleLoading ? (
+                        <span>Đang mở Google & Chờ duyệt...</span>
+                      ) : (
+                        <span>Mở Cửa Sổ Google & Đăng Nhập →</span>
+                      )}
+                    </button>
+                  </form>
+
+                  <div className="relative flex items-center justify-center my-4">
+                    <div className="border-t border-slate-800 w-full" />
+                    <span className="bg-[#0B1528] px-3 text-[10px] font-bold tracking-widest text-slate-500 uppercase">HOẶC</span>
+                    <div className="border-t border-slate-800 w-full" />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleDirectGmailQuickLogin}
+                    className="w-full py-2.5 px-4 rounded-xl bg-[#131E34] hover:bg-[#1A2845] border border-slate-700/60 flex items-center justify-center gap-2 text-cyan-300 font-semibold text-xs transition-all shadow-sm cursor-pointer"
+                  >
+                    <span>✨</span>
+                    <span>Đăng Nhập Nhanh Trực Tiếp Bằng Gmail</span>
+                  </button>
+
+                  <div className="mt-5 text-center text-xs text-slate-400">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('login')}
+                      className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline"
+                    >
+                      ← Quay lại Đăng nhập
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ===================== VIEW 3: REGISTER ===================== */}
               {activeTab === 'register' && (
                 <div>
                   <div className="w-14 h-14 rounded-2xl bg-[#132A45] border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-500/15 mx-auto">
@@ -4675,7 +4870,7 @@
                 </div>
               )}
 
-              {/* ===================== VIEW 3: RESET PASSWORD ===================== */}
+              {/* ===================== VIEW 4: RESET PASSWORD ===================== */}
               {activeTab === 'reset_password' && (
                 <div>
                   <div className="w-14 h-14 rounded-2xl bg-[#132A45] border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-500/15 mx-auto">
@@ -4763,7 +4958,7 @@
                 </div>
               )}
 
-              {/* ===================== VIEW 4: PROFILE & CLOUD ===================== */}
+              {/* ===================== VIEW 5: PROFILE & CLOUD ===================== */}
               {activeTab === 'profile' && currentUser && (
                 <div className="space-y-4">
                   <div className="p-4 rounded-2xl bg-[#131E34] border border-slate-700/70">
@@ -4779,9 +4974,13 @@
 
                     <div className="mt-3 flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-400 text-white flex items-center justify-center font-extrabold text-base shadow-md">
-                          {currentUser.name?.charAt(0) || currentUser.email?.charAt(0) || 'U'}
-                        </div>
+                        {currentUser.avatar ? (
+                          <img src={currentUser.avatar} alt="User" className="w-11 h-11 rounded-xl border border-cyan-500/40 object-cover shadow-md" />
+                        ) : (
+                          <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-400 text-white flex items-center justify-center font-extrabold text-base shadow-md">
+                            {currentUser.name?.charAt(0) || currentUser.email?.charAt(0) || 'U'}
+                          </div>
+                        )}
                         <div>
                           <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
                             <span>{currentUser.name || 'Người dùng'}</span>

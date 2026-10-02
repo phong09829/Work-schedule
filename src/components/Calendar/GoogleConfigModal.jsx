@@ -20,11 +20,18 @@ import {
   Link as LinkIcon, 
   Copy, 
   Anchor,
-  ArrowRight
+  ArrowRight,
+  ExternalLink,
+  ShieldCheck,
+  Sparkles
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { exportFullBackup } from '../../utils/cloudSync';
-import { GOOGLE_SCOPES } from '../../utils/googleCalendar';
+import { 
+  GOOGLE_SCOPES, 
+  GOOGLE_STORAGE_KEYS, 
+  initiateGoogleOAuthLogin 
+} from '../../utils/googleCalendar';
 
 // Google Colored G Logo
 const GoogleIcon = ({ className = "w-4 h-4" }) => (
@@ -67,11 +74,14 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     tasks,
     pomoSessions,
     settings,
+    googleClientId,
+    setGoogleClientId,
+    setActiveTab: setAppActiveTab,
     showToast,
     handleGoogleLoginSuccess,
   } = useApp();
 
-  // Active Tab: 'login' | 'register' | 'reset_password' | 'profile'
+  // Active Tab: 'login' | 'register' | 'reset_password' | 'google_setup' | 'profile'
   const [activeTab, setActiveTab] = useState(() => {
     return isAccountLoggedIn ? 'profile' : 'login';
   });
@@ -88,6 +98,10 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+
+  // Google Client ID Setup State
+  const [inputClientId, setInputClientId] = useState(googleClientId || '');
 
   // Register Form State
   const [regName, setRegName] = useState('');
@@ -132,6 +146,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
       });
 
       if (res && res.ok) {
+        if (setAppActiveTab) setAppActiveTab('calendar');
         setActiveTab('profile');
         onClose();
       } else {
@@ -167,6 +182,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
       });
 
       if (res && res.ok) {
+        if (setAppActiveTab) setAppActiveTab('calendar');
         setActiveTab('profile');
         onClose();
       }
@@ -199,6 +215,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
       });
 
       if (res && res.ok) {
+        if (setAppActiveTab) setAppActiveTab('calendar');
         setActiveTab('profile');
         onClose();
       }
@@ -207,35 +224,99 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     }
   };
 
-  // Handle Google Login Flow
+  // Handle Google OAuth Direct Popup Flow
   const handleGoogleLogin = async () => {
-    if (window.google?.accounts?.oauth2 && handleGoogleLoginSuccess) {
+    const activeClientId = 
+      googleClientId || 
+      settings?.googleClientId || 
+      (typeof window !== 'undefined' ? localStorage.getItem(GOOGLE_STORAGE_KEYS.CLIENT_ID) : '') || 
+      '';
+
+    if (activeClientId && activeClientId.trim()) {
+      setIsGoogleLoading(true);
+      showToast('Đang mở cửa sổ đăng nhập Google...', 'info', 3000);
       try {
-        const client = window.google.accounts.oauth2.initTokenClient({
-          client_id: settings?.googleClientId || 'YOUR_GOOGLE_CLIENT_ID',
-          scope: GOOGLE_SCOPES,
-          callback: (response) => {
-            if (response.access_token) {
-              handleGoogleLoginSuccess(response);
-              onClose();
+        await initiateGoogleOAuthLogin({
+          clientId: activeClientId.trim(),
+          onSuccess: async (tokenResponse) => {
+            setIsGoogleLoading(false);
+            if (handleGoogleLoginSuccess) {
+              const ok = await handleGoogleLoginSuccess(tokenResponse);
+              if (ok) {
+                if (setAppActiveTab) setAppActiveTab('calendar');
+                onClose();
+              }
             }
           },
+          onError: (err) => {
+            setIsGoogleLoading(false);
+            console.error('Google OAuth popup error:', err);
+            showToast('Chưa hoàn tất phê duyệt tài khoản Google hoặc đã đóng cửa sổ.', 'warning');
+          }
         });
-        client.requestAccessToken();
-        return;
-      } catch (e) {
-        console.warn('Google Identity Services client error:', e);
+      } catch (err) {
+        setIsGoogleLoading(false);
+        showToast(err.message || 'Lỗi mở Google Identity Services', 'error');
       }
+      return;
     }
 
-    // Direct Google / Gmail Email Login prompt
-    const email = prompt('Nhập địa chỉ Gmail của bạn để đăng nhập:', loginEmail || '');
+    // If no client ID configured yet, open Google Setup view
+    setInputClientId(activeClientId);
+    setActiveTab('google_setup');
+  };
+
+  // Save Google Client ID & Trigger Google OAuth Login immediately
+  const handleSaveClientIdAndAuth = async (e) => {
+    if (e) e.preventDefault();
+    const cid = inputClientId.trim();
+    if (!cid) {
+      showToast('Vui lòng nhập Google Client ID của bạn!', 'warning');
+      return;
+    }
+
+    if (setGoogleClientId) setGoogleClientId(cid);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(GOOGLE_STORAGE_KEYS.CLIENT_ID, cid);
+    }
+
+    setIsGoogleLoading(true);
+    showToast('Đang mở cửa sổ phê duyệt Google...', 'info', 3000);
+    try {
+      await initiateGoogleOAuthLogin({
+        clientId: cid,
+        onSuccess: async (tokenResponse) => {
+          setIsGoogleLoading(false);
+          if (handleGoogleLoginSuccess) {
+            const ok = await handleGoogleLoginSuccess(tokenResponse);
+            if (ok) {
+              if (setAppActiveTab) setAppActiveTab('calendar');
+              onClose();
+            }
+          }
+        },
+        onError: (err) => {
+          setIsGoogleLoading(false);
+          console.error('Google popup error:', err);
+          showToast('Chưa duyệt cấp quyền Google hoặc đã đóng cửa sổ.', 'warning');
+        }
+      });
+    } catch (err) {
+      setIsGoogleLoading(false);
+      showToast(err.message || 'Lỗi mở Google OAuth', 'error');
+    }
+  };
+
+  // Quick Direct Gmail Login Fallback (Without Client ID)
+  const handleDirectGmailQuickLogin = async () => {
+    const email = prompt('Nhập địa chỉ Gmail của bạn để đăng nhập ngay vào Schedule:', loginEmail || '');
     if (email && email.trim() && email.includes('@')) {
       setIsSubmitting(true);
       try {
         const cleanEmail = email.trim();
         const res = await loginAccount({ email: cleanEmail, password: 'password123' });
         if (res && res.ok) {
+          if (setAppActiveTab) setAppActiveTab('calendar');
           onClose();
         } else {
           // If not registered yet, auto-register with standard password
@@ -245,6 +326,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
             name: cleanEmail.split('@')[0],
           });
           if (regRes && regRes.ok) {
+            if (setAppActiveTab) setAppActiveTab('calendar');
             onClose();
           }
         }
@@ -408,7 +490,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                 {/* Submit Button */}
                 <button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isGoogleLoading}
                   className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 hover:from-blue-500 hover:to-cyan-300 text-white font-bold text-sm sm:text-base shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-70 mt-2 cursor-pointer"
                 >
                   {isSubmitting ? (
@@ -437,11 +519,21 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
               {/* Google Login Button */}
               <button
                 type="button"
+                disabled={isGoogleLoading || isSubmitting}
                 onClick={handleGoogleLogin}
-                className="w-full py-3 px-4 rounded-xl bg-[#131E34] hover:bg-[#1A2845] border border-slate-700/60 flex items-center justify-center gap-3 text-slate-200 font-semibold text-xs sm:text-sm transition-all shadow-sm cursor-pointer"
+                className="w-full py-3 px-4 rounded-xl bg-[#131E34] hover:bg-[#1A2845] border border-slate-700/60 flex items-center justify-center gap-3 text-slate-200 font-semibold text-xs sm:text-sm transition-all shadow-sm cursor-pointer disabled:opacity-60"
               >
-                <GoogleIcon className="w-4 h-4 shrink-0" />
-                <span>Đăng nhập bằng Google</span>
+                {isGoogleLoading ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
+                    <span className="text-cyan-300 font-bold">Đang mở Google & Chờ duyệt...</span>
+                  </>
+                ) : (
+                  <>
+                    <GoogleIcon className="w-4 h-4 shrink-0" />
+                    <span>Đăng nhập bằng Google</span>
+                  </>
+                )}
               </button>
 
               {/* Bottom Switch Link */}
@@ -461,7 +553,95 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
             </div>
           )}
 
-          {/* ===================== VIEW 2: REGISTER ===================== */}
+          {/* ===================== VIEW 2: GOOGLE CLIENT ID SETUP ===================== */}
+          {activeTab === 'google_setup' && (
+            <div>
+              {/* Google Header Icon */}
+              <div className="w-14 h-14 rounded-2xl bg-[#132A45] border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-500/15 mx-auto">
+                <GoogleIcon className="w-7 h-7" />
+              </div>
+
+              <h2 className="text-2xl font-extrabold text-white text-center mt-4 tracking-tight">
+                Đăng Nhập Google OAuth
+              </h2>
+              <p className="text-xs text-slate-400 text-center mt-1.5 mb-5 leading-relaxed">
+                Truy cập trực tiếp vào Google, đăng nhập tài khoản Gmail của bạn và phê duyệt quyền để mở thẳng tài khoản Schedule.
+              </p>
+
+              <form onSubmit={handleSaveClientIdAndAuth} className="space-y-4">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    GOOGLE CLIENT ID (OAuth 2.0 Web Client)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={inputClientId}
+                    onChange={(e) => setInputClientId(e.target.value)}
+                    placeholder="VD: 123456789-abcdef.apps.googleusercontent.com"
+                    className="w-full px-3.5 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs font-mono text-white placeholder-slate-500 focus:outline-none transition"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                    <span>💡 Lấy Client ID miễn phí từ</span>
+                    <a 
+                      href="https://console.cloud.google.com/apis/credentials" 
+                      target="_blank" 
+                      rel="noreferrer"
+                      className="text-cyan-400 hover:underline flex items-center gap-0.5"
+                    >
+                      Google Cloud Console <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isGoogleLoading}
+                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 hover:from-blue-500 hover:to-cyan-300 text-white font-bold text-xs sm:text-sm shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-70 cursor-pointer"
+                >
+                  {isGoogleLoading ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Đang mở Google & Chờ duyệt...</span>
+                    </>
+                  ) : (
+                    <>
+                      <GoogleIcon className="w-4 h-4 shrink-0" />
+                      <span>Mở Cửa Sổ Google & Đăng Nhập →</span>
+                    </>
+                  )}
+                </button>
+              </form>
+
+              <div className="relative flex items-center justify-center my-4">
+                <div className="border-t border-slate-800 w-full" />
+                <span className="bg-[#0B1528] px-3 text-[10px] font-bold tracking-widest text-slate-500 uppercase">HOẶC</span>
+                <div className="border-t border-slate-800 w-full" />
+              </div>
+
+              {/* Direct Gmail Login */}
+              <button
+                type="button"
+                onClick={handleDirectGmailQuickLogin}
+                className="w-full py-2.5 px-4 rounded-xl bg-[#131E34] hover:bg-[#1A2845] border border-slate-700/60 flex items-center justify-center gap-2 text-cyan-300 font-semibold text-xs transition-all shadow-sm cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Đăng Nhập Nhanh Trực Tiếp Bằng Gmail</span>
+              </button>
+
+              <div className="mt-5 text-center text-xs text-slate-400">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('login')}
+                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline"
+                >
+                  ← Quay lại Đăng nhập
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ===================== VIEW 3: REGISTER ===================== */}
           {activeTab === 'register' && (
             <div>
               {/* Anchor Badge */}
@@ -616,7 +796,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
             </div>
           )}
 
-          {/* ===================== VIEW 3: RESET PASSWORD ===================== */}
+          {/* ===================== VIEW 4: RESET PASSWORD ===================== */}
           {activeTab === 'reset_password' && (
             <div>
               {/* Anchor Badge */}
@@ -734,7 +914,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
             </div>
           )}
 
-          {/* ===================== VIEW 4: PROFILE & CLOUD (When Logged In) ===================== */}
+          {/* ===================== VIEW 5: PROFILE & CLOUD (When Logged In) ===================== */}
           {activeTab === 'profile' && currentUser && (
             <div className="space-y-4">
               
@@ -759,9 +939,17 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
 
                 <div className="mt-3 flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-400 text-white flex items-center justify-center font-extrabold text-base shadow-md">
-                      {currentUser.name?.charAt(0) || currentUser.email?.charAt(0) || 'U'}
-                    </div>
+                    {currentUser.avatar ? (
+                      <img 
+                        src={currentUser.avatar} 
+                        alt={currentUser.name || 'User'} 
+                        className="w-11 h-11 rounded-xl border border-cyan-500/40 object-cover shadow-md"
+                      />
+                    ) : (
+                      <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-400 text-white flex items-center justify-center font-extrabold text-base shadow-md">
+                        {currentUser.name?.charAt(0) || currentUser.email?.charAt(0) || 'U'}
+                      </div>
+                    )}
                     <div>
                       <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
                         <span>{currentUser.name || 'Người dùng'}</span>
