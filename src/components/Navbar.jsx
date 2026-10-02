@@ -101,31 +101,31 @@ export const Navbar = () => {
               {/* Account & Cloud Sync Status Button */}
               <button
                 onClick={() => setIsGoogleModalOpen(true)}
-                title={isAccountLoggedIn ? `Tài khoản Đám Mây: ${currentUser?.email}` : 'Đăng nhập Gmail để đồng bộ mọi thiết bị'}
+                title={isAccountLoggedIn ? `Tài khoản: ${currentUser?.email}` : 'Đăng nhập tài khoản'}
                 className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-sm ${
                   isAccountLoggedIn
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20'
-                    : 'bg-gradient-to-r from-brand-600 to-purple-600 text-white border-transparent hover:from-brand-500 hover:to-purple-500 shadow-brand-500/20'
+                    ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-500/20'
+                    : 'bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 text-white border-transparent hover:opacity-90 shadow-cyan-500/20'
                 }`}
               >
                 {isAccountLoggedIn ? (
                   <>
-                    <div className="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] font-bold">
+                    <div className="w-4 h-4 rounded-full bg-cyan-500 text-white flex items-center justify-center text-[10px] font-bold">
                       {currentUser?.name?.charAt(0) || currentUser?.email?.charAt(0) || 'U'}
                     </div>
                     <span className="hidden sm:inline max-w-[110px] truncate">
                       {currentUser?.name?.split(' ')[0] || currentUser?.email?.split('@')[0]}
                     </span>
                     {isCloudSyncing ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-brand-500" />
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-500" />
                     ) : (
-                      <Cloud className="w-3.5 h-3.5 text-emerald-500" />
+                      <Cloud className="w-3.5 h-3.5 text-cyan-500" />
                     )}
                   </>
                 ) : (
                   <>
-                    <Cloud className="w-3.5 h-3.5" />
-                    <span className="text-xs">Đăng Nhập Gmail</span>
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span className="text-xs">Đăng Nhập</span>
                   </>
                 )}
               </button>

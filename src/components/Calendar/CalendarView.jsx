@@ -152,13 +152,13 @@ export const CalendarView = () => {
           >
             {isAccountLoggedIn ? (
               <>
-                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                <ShieldCheck className="w-4 h-4 text-cyan-500" />
                 <span>{currentUser?.name || currentUser?.email?.split('@')[0]}</span>
               </>
             ) : (
               <>
-                <Lock className="w-4 h-4 text-brand-500" />
-                <span>Đăng Nhập Gmail</span>
+                <Lock className="w-4 h-4 text-cyan-500" />
+                <span>Đăng Nhập</span>
               </>
             )}
           </button>
@@ -166,7 +166,7 @@ export const CalendarView = () => {
           {/* New Event Button */}
           <button
             onClick={() => handleOpenAddEvent(currentDate)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-lg shadow-brand-500/25 active:scale-95 transition"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-bold text-xs shadow-lg shadow-cyan-500/25 active:scale-95 transition"
           >
             <Plus className="w-4 h-4" />
             <span>Thêm Sự Kiện</span>
@@ -177,27 +177,27 @@ export const CalendarView = () => {
       {/* Account Schedule Status Banner */}
       <div className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs ${
         isAccountLoggedIn
-          ? 'bg-emerald-50/70 dark:bg-emerald-950/25 border-emerald-200/80 dark:border-emerald-900/40 text-emerald-900 dark:text-emerald-200'
-          : 'bg-amber-50/70 dark:bg-amber-950/25 border-amber-200/80 dark:border-amber-900/40 text-amber-900 dark:text-amber-200'
+          ? 'bg-cyan-950/20 border-cyan-800/40 text-cyan-200'
+          : 'bg-slate-900/60 border-slate-800 text-slate-300'
       }`}>
         <div className="flex items-center gap-2.5">
           {isAccountLoggedIn ? (
-            <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+            <div className="w-6 h-6 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center shrink-0">
               <ShieldCheck className="w-4 h-4" />
             </div>
           ) : (
-            <div className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+            <div className="w-6 h-6 rounded-lg bg-blue-500/20 text-cyan-400 flex items-center justify-center shrink-0">
               <Lock className="w-4 h-4" />
             </div>
           )}
           <div>
             {isAccountLoggedIn ? (
               <span>
-                Đang lưu trữ lịch trình cho tài khoản: <strong className="font-bold text-emerald-700 dark:text-emerald-300 font-mono">{currentUser?.email}</strong>. Mọi chỉnh sửa sự kiện được tự động lưu an toàn.
+                Đang lưu trữ lịch trình cho tài khoản: <strong className="font-bold text-cyan-300 font-mono">{currentUser?.email}</strong>. Mọi chỉnh sửa sự kiện được tự động lưu an toàn.
               </span>
             ) : (
               <span>
-                Bạn đang ở chế độ khách. Hãy <strong className="font-bold">Đăng nhập tài khoản Gmail</strong> để mỗi tài khoản có 1 mật khẩu riêng và lưu giữ toàn bộ lịch trình không bị mất!
+                Bạn đang ở chế độ khách. Hãy <strong className="font-bold text-white">Đăng nhập tài khoản</strong> để lưu giữ toàn bộ lịch trình không bị mất!
               </span>
             )}
           </div>
@@ -207,11 +207,11 @@ export const CalendarView = () => {
           onClick={() => setIsGoogleModalOpen(true)}
           className={`px-3 py-1.5 rounded-xl font-bold transition shrink-0 ${
             isAccountLoggedIn
-              ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
-              : 'bg-amber-600 hover:bg-amber-500 text-white shadow-sm'
+              ? 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-sm'
+              : 'bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white shadow-sm'
           }`}
         >
-          {isAccountLoggedIn ? 'Đổi Mật Khẩu / Đăng Xuất' : 'Đăng Nhập / Đăng Ký Ngay'}
+          {isAccountLoggedIn ? 'Hồ Sơ / Đăng Xuất' : 'Đăng Nhập Ngay'}
         </button>
       </div>
 

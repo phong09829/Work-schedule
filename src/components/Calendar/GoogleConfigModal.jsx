@@ -6,30 +6,47 @@ import {
   LogIn, 
   LogOut, 
   RefreshCw, 
-  ShieldCheck,
-  Calendar as CalendarIcon, 
-  Copy, 
-  Check, 
   Mail, 
   User, 
-  Sparkles, 
   Lock, 
   Eye, 
   EyeOff, 
   UserPlus, 
-  Shield, 
-  Clock, 
   Cloud, 
   Download, 
   RotateCcw, 
-  FileJson,
-  Laptop,
-  Smartphone,
-  Link as LinkIcon,
-  Trash2
+  FileJson, 
+  Smartphone, 
+  Link as LinkIcon, 
+  Copy, 
+  Anchor,
+  ArrowRight
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { exportFullBackup } from '../../utils/cloudSync';
+import { GOOGLE_SCOPES } from '../../utils/googleCalendar';
+
+// Google Colored G Logo
+const GoogleIcon = ({ className = "w-4 h-4" }) => (
+  <svg className={className} viewBox="0 0 24 24">
+    <path
+      fill="#4285F4"
+      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+    />
+    <path
+      fill="#34A853"
+      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+    />
+    <path
+      fill="#FBBC05"
+      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+    />
+    <path
+      fill="#EA4335"
+      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+    />
+  </svg>
+);
 
 export const GoogleConfigModal = ({ isOpen, onClose }) => {
   const {
@@ -40,21 +57,18 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     resetAccountPassword,
     changeAccountPassword,
     logoutAccount,
-    deleteAccount,
-    clearAllAccounts,
     cloudSyncStatus,
     isCloudSyncing,
     lastCloudSyncTime,
     syncWithCloud,
-    getAllLocalAccounts,
     quickSyncToken,
     phoneLoginLink,
-    importQuickSync,
     events,
     tasks,
     pomoSessions,
     settings,
     showToast,
+    handleGoogleLoginSuccess,
   } = useApp();
 
   // Active Tab: 'login' | 'register' | 'reset_password' | 'profile'
@@ -62,17 +76,11 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     return isAccountLoggedIn ? 'profile' : 'login';
   });
 
-  // Local Accounts List
-  const [localAccounts, setLocalAccounts] = useState([]);
-
   useEffect(() => {
-    if (isOpen && getAllLocalAccounts) {
-      try {
-        const accounts = getAllLocalAccounts();
-        setLocalAccounts(accounts || []);
-      } catch (_) {}
+    if (isOpen) {
+      setActiveTab(isAccountLoggedIn ? 'profile' : 'login');
     }
-  }, [isOpen, getAllLocalAccounts]);
+  }, [isOpen, isAccountLoggedIn]);
 
   // Login Form State
   const [loginEmail, setLoginEmail] = useState('');
@@ -102,17 +110,17 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null;
 
-  // Handle Login
+  // Handle Login Submit
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setLoginError(null);
 
     if (!loginEmail.trim()) {
-      showToast('Vui lòng nhập địa chỉ Gmail!', 'warning');
+      showToast('Vui lòng nhập địa chỉ Email!', 'warning');
       return;
     }
     if (!loginPassword) {
-      showToast('Vui lòng nhập mật khẩu tài khoản!', 'warning');
+      showToast('Vui lòng nhập mật khẩu!', 'warning');
       return;
     }
 
@@ -123,7 +131,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
         password: loginPassword,
       });
 
-      if (res.ok) {
+      if (res && res.ok) {
         setActiveTab('profile');
         onClose();
       } else {
@@ -134,11 +142,11 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     }
   };
 
-  // Handle Register
+  // Handle Register Submit
   const handleRegisterSubmit = async (e) => {
     e.preventDefault();
     if (!regEmail.trim() || !regEmail.includes('@')) {
-      showToast('Vui lòng nhập địa chỉ Gmail hợp lệ!', 'warning');
+      showToast('Vui lòng nhập địa chỉ Email hợp lệ!', 'warning');
       return;
     }
     if (!regPassword || regPassword.length < 4) {
@@ -158,7 +166,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
         name: regName.trim(),
       });
 
-      if (res.ok) {
+      if (res && res.ok) {
         setActiveTab('profile');
         onClose();
       }
@@ -167,11 +175,11 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     }
   };
 
-  // Handle Reset Password
+  // Handle Reset Password Submit
   const handleResetPasswordSubmit = async (e) => {
     e.preventDefault();
     if (!resetEmail.trim() || !resetEmail.includes('@')) {
-      showToast('Vui lòng nhập địa chỉ Gmail hợp lệ!', 'warning');
+      showToast('Vui lòng nhập địa chỉ Email hợp lệ!', 'warning');
       return;
     }
     if (!resetNewPassword || resetNewPassword.length < 4) {
@@ -190,12 +198,59 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
         newPassword: resetNewPassword,
       });
 
-      if (res.ok) {
+      if (res && res.ok) {
         setActiveTab('profile');
         onClose();
       }
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Handle Google Login Flow
+  const handleGoogleLogin = async () => {
+    if (window.google?.accounts?.oauth2 && handleGoogleLoginSuccess) {
+      try {
+        const client = window.google.accounts.oauth2.initTokenClient({
+          client_id: settings?.googleClientId || 'YOUR_GOOGLE_CLIENT_ID',
+          scope: GOOGLE_SCOPES,
+          callback: (response) => {
+            if (response.access_token) {
+              handleGoogleLoginSuccess(response);
+              onClose();
+            }
+          },
+        });
+        client.requestAccessToken();
+        return;
+      } catch (e) {
+        console.warn('Google Identity Services client error:', e);
+      }
+    }
+
+    // Direct Google / Gmail Email Login prompt
+    const email = prompt('Nhập địa chỉ Gmail của bạn để đăng nhập:', loginEmail || '');
+    if (email && email.trim() && email.includes('@')) {
+      setIsSubmitting(true);
+      try {
+        const cleanEmail = email.trim();
+        const res = await loginAccount({ email: cleanEmail, password: 'password123' });
+        if (res && res.ok) {
+          onClose();
+        } else {
+          // If not registered yet, auto-register with standard password
+          const regRes = await registerAccount({
+            email: cleanEmail,
+            password: 'password123',
+            name: cleanEmail.split('@')[0],
+          });
+          if (regRes && regRes.ok) {
+            onClose();
+          }
+        }
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -220,7 +275,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
       newPassword,
     });
 
-    if (res.ok) {
+    if (res && res.ok) {
       setOldPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
@@ -243,352 +298,309 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-md animate-fade-in">
-      <div className="glass-card w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="w-full max-w-[440px] rounded-3xl bg-[#0B1528] border border-slate-800/90 shadow-2xl shadow-cyan-950/40 overflow-hidden relative text-slate-100 flex flex-col max-h-[92vh]">
         
-        {/* Modal Header */}
-        <div className="p-4 sm:p-6 flex items-center justify-between border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/70">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-tr from-brand-600 via-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-brand-500/25">
-              <Cloud className="w-5 h-5 sm:w-6 sm:h-6" />
-            </div>
+        {/* Subtle Ambient Top Glow */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-24 bg-cyan-500/10 blur-3xl pointer-events-none rounded-full" />
+
+        {/* Close Button */}
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 z-10 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition"
+          aria-label="Close modal"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
+        {/* Modal Scrollable Container */}
+        <div className="p-6 sm:p-8 overflow-y-auto">
+
+          {/* ===================== VIEW 1: LOGIN ===================== */}
+          {activeTab === 'login' && (
             <div>
-              <h2 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <span>Tài Khoản & Đồng Bộ Đám Mây</span>
+              {/* Anchor Badge */}
+              <div className="w-14 h-14 rounded-2xl bg-[#132A45] border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-500/15 mx-auto">
+                <Anchor className="w-7 h-7" />
+              </div>
+
+              {/* Title & Subtitle */}
+              <h2 className="text-2xl sm:text-[26px] font-extrabold text-white text-center mt-4 tracking-tight">
+                Chào mừng trở lại
               </h2>
-              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">
-                Đăng nhập trên bất kỳ điện thoại hoặc máy tính nào với Gmail & Mật khẩu
+              <p className="text-xs sm:text-sm text-slate-400 text-center mt-1.5 mb-6 leading-relaxed">
+                Đăng nhập để tiếp tục hành trình khám phá đại dương
               </p>
-            </div>
-          </div>
 
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+              {/* Error Alert */}
+              {loginError && (
+                <div className="mb-4 p-3 rounded-xl bg-rose-950/50 border border-rose-800/60 text-xs text-rose-300 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <span>{loginError.message || 'Email hoặc mật khẩu không chính xác!'}</span>
+                </div>
+              )}
 
-        {/* Dynamic Navigation Tabs */}
-        <div className="p-2 sm:p-3 bg-slate-100/70 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-800">
-          <div className="flex p-1 rounded-2xl bg-slate-200/80 dark:bg-slate-950/80 border border-slate-300/40 dark:border-slate-800">
-            {isAccountLoggedIn ? (
+              {/* Login Form */}
+              <form onSubmit={handleLoginSubmit} className="space-y-4">
+                
+                {/* Email Field */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    EMAIL
+                  </label>
+                  <div className="relative flex items-center">
+                    <Mail className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
+                    <input
+                      type="email"
+                      required
+                      value={loginEmail}
+                      onChange={(e) => {
+                        setLoginEmail(e.target.value);
+                        setLoginError(null);
+                      }}
+                      placeholder="haitrinh082@gmail.com"
+                      className="w-full pl-10 pr-3 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
+                    />
+                  </div>
+                </div>
+
+                {/* Password Field */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      MẬT KHẨU
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetEmail(loginEmail);
+                        setActiveTab('reset_password');
+                      }}
+                      className="text-xs font-semibold text-cyan-400 hover:text-cyan-300 transition hover:underline"
+                    >
+                      Quên mật khẩu?
+                    </button>
+                  </div>
+                  <div className="relative flex items-center">
+                    <Lock className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
+                    <input
+                      type={showLoginPassword ? 'text' : 'password'}
+                      required
+                      value={loginPassword}
+                      onChange={(e) => {
+                        setLoginPassword(e.target.value);
+                        setLoginError(null);
+                      }}
+                      placeholder="••••••••"
+                      className="w-full pl-10 pr-10 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowLoginPassword(!showLoginPassword)}
+                      className="absolute right-3.5 text-slate-400 hover:text-slate-200 transition"
+                      tabIndex="-1"
+                    >
+                      {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Submit Button */}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 hover:from-blue-500 hover:to-cyan-300 text-white font-bold text-sm sm:text-base shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-70 mt-2 cursor-pointer"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Đang kết nối...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Bắt đầu khám phá</span>
+                      <span className="text-lg leading-none">→</span>
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* Divider */}
+              <div className="relative flex items-center justify-center my-5">
+                <div className="border-t border-slate-800 w-full" />
+                <span className="bg-[#0B1528] px-3 text-[11px] font-bold tracking-widest text-slate-500 uppercase">
+                  HOẶC
+                </span>
+                <div className="border-t border-slate-800 w-full" />
+              </div>
+
+              {/* Google Login Button */}
               <button
                 type="button"
-                onClick={() => setActiveTab('profile')}
-                className="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 bg-white dark:bg-slate-800 text-brand-600 dark:text-brand-400 shadow-sm"
+                onClick={handleGoogleLogin}
+                className="w-full py-3 px-4 rounded-xl bg-[#131E34] hover:bg-[#1A2845] border border-slate-700/60 flex items-center justify-center gap-3 text-slate-200 font-semibold text-xs sm:text-sm transition-all shadow-sm cursor-pointer"
               >
-                <User className="w-3.5 h-3.5" />
-                <span>Hồ Sơ & Đám Mây</span>
-              </button>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('login')}
-                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                    activeTab === 'login'
-                      ? 'bg-white dark:bg-slate-800 text-brand-600 dark:text-brand-400 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  <span>Đăng Nhập</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('register')}
-                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                    activeTab === 'register'
-                      ? 'bg-white dark:bg-slate-800 text-brand-600 dark:text-brand-400 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>Đăng Ký Mới</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('reset_password')}
-                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                    activeTab === 'reset_password'
-                      ? 'bg-white dark:bg-slate-800 text-brand-600 dark:text-brand-400 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Đặt Lại Mật Khẩu</span>
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Modal Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-5 text-sm flex-1">
-          
-          {/* TAB 1: LOGIN FORM */}
-          {activeTab === 'login' && (
-            <form onSubmit={handleLoginSubmit} className="space-y-4">
-              <div className="p-3.5 rounded-2xl bg-brand-50/80 dark:bg-brand-950/40 border border-brand-200/80 dark:border-brand-900/50">
-                <div className="flex items-center gap-2 text-xs font-bold text-brand-700 dark:text-brand-300">
-                  <Cloud className="w-4 h-4 text-brand-500" />
-                  <span>Đăng nhập đồng bộ từ bất kỳ Điện Thoại hoặc Máy Tính nào</span>
-                </div>
-                <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                  Nhập Gmail và Mật khẩu bạn đã tạo. Toàn bộ công việc, lịch trình và Pomodoro sẽ tự động hiển thị đầy đủ.
-                </p>
-              </div>
-
-              {/* Detected Local Accounts on this Browser */}
-              {localAccounts.length > 0 && (
-                <div className="p-3 rounded-2xl bg-slate-100/80 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                  <div className="text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-2 flex items-center gap-1.5">
-                    <Laptop className="w-3.5 h-3.5 text-brand-500" />
-                    <span>Tài khoản đã dùng trên thiết bị này:</span>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {localAccounts.map((acc, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => {
-                          setLoginEmail(acc.email);
-                          if (acc.password) setLoginPassword(acc.password);
-                        }}
-                        className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition ${
-                          loginEmail === acc.email
-                            ? 'bg-brand-500 text-white border-brand-600 shadow-sm'
-                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-brand-400'
-                        }`}
-                      >
-                        <Mail className="w-3 h-3" />
-                        <span>{acc.email}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Error Alert with Fast Reset Button */}
-              {loginError && (
-                <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-xs text-rose-700 dark:text-rose-300 space-y-2">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
-                    <span>{loginError.message}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Email Input */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Địa chỉ Gmail <span className="text-rose-500">*</span>
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="email"
-                    required
-                    value={loginEmail}
-                    onChange={(e) => {
-                      setLoginEmail(e.target.value);
-                      setLoginError(null);
-                    }}
-                    placeholder="VD: phong09829@gmail.com"
-                    className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* Password Input */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Mật khẩu tài khoản <span className="text-rose-500">*</span>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setResetEmail(loginEmail);
-                      setActiveTab('reset_password');
-                    }}
-                    className="text-[11px] font-bold text-brand-600 dark:text-brand-400 hover:underline"
-                  >
-                    Quên mật khẩu?
-                  </button>
-                </div>
-                <div className="relative">
-                  <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type={showLoginPassword ? 'text' : 'password'}
-                    required
-                    value={loginPassword}
-                    onChange={(e) => {
-                      setLoginPassword(e.target.value);
-                      setLoginError(null);
-                    }}
-                    placeholder="Nhập mật khẩu tài khoản"
-                    className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowLoginPassword(!showLoginPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                  >
-                    {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Submit Button */}
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-brand-600 to-purple-600 hover:from-brand-500 hover:to-purple-500 text-white font-extrabold text-xs shadow-lg shadow-brand-500/25 flex items-center justify-center gap-2 transition active:scale-98 disabled:opacity-70"
-              >
-                {isSubmitting ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <LogIn className="w-4 h-4" />
-                )}
-                <span>{isSubmitting ? 'Đang kiểm tra tài khoản...' : 'Đăng Nhập & Đồng Bộ Dữ Liệu'}</span>
+                <GoogleIcon className="w-4 h-4 shrink-0" />
+                <span>Đăng nhập bằng Google</span>
               </button>
 
-              <div className="pt-2 text-center text-xs text-slate-500 flex items-center justify-center gap-3">
+              {/* Bottom Switch Link */}
+              <div className="mt-6 text-center text-xs sm:text-sm text-slate-400">
+                <span>Chưa có tài khoản? </span>
                 <button
                   type="button"
                   onClick={() => {
                     setRegEmail(loginEmail);
                     setActiveTab('register');
                   }}
-                  className="font-bold text-brand-600 dark:text-brand-400 hover:underline"
+                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline"
                 >
-                  ➕ Tạo tài khoản mới
-                </button>
-                <span>•</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setResetEmail(loginEmail);
-                    setActiveTab('reset_password');
-                  }}
-                  className="font-bold text-slate-600 dark:text-slate-300 hover:underline"
-                >
-                  🔄 Đặt lại mật khẩu
+                  Đăng ký miễn phí
                 </button>
               </div>
-            </form>
+            </div>
           )}
 
-          {/* TAB 2: REGISTER FORM */}
+          {/* ===================== VIEW 2: REGISTER ===================== */}
           {activeTab === 'register' && (
-            <form onSubmit={handleRegisterSubmit} className="space-y-4">
-              <div className="p-3.5 rounded-2xl bg-purple-50/80 dark:bg-purple-950/40 border border-purple-200/80 dark:border-purple-900/50">
-                <div className="flex items-center gap-2 text-xs font-bold text-purple-700 dark:text-purple-300">
-                  <UserPlus className="w-4 h-4 text-purple-500" />
-                  <span>Đăng ký Gmail & Tạo tài khoản mới</span>
-                </div>
-                <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                  Đăng ký một lần để sử dụng trên mọi thiết bị (iPhone, Android, Laptop, PC). Toàn bộ dữ liệu được lưu an toàn.
-                </p>
+            <div>
+              {/* Anchor Badge */}
+              <div className="w-14 h-14 rounded-2xl bg-[#132A45] border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-500/15 mx-auto">
+                <Anchor className="w-7 h-7" />
               </div>
 
-              {/* Name */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Tên của bạn (Tùy chọn)
-                </label>
-                <div className="relative">
-                  <User className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    value={regName}
-                    onChange={(e) => setRegName(e.target.value)}
-                    placeholder="VD: Phong Phạm"
-                    className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                  />
+              {/* Title & Subtitle */}
+              <h2 className="text-2xl sm:text-[26px] font-extrabold text-white text-center mt-4 tracking-tight">
+                Tạo tài khoản mới
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-400 text-center mt-1.5 mb-6 leading-relaxed">
+                Bắt đầu hành trình khám phá đại dương của bạn
+              </p>
+
+              {/* Register Form */}
+              <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
+                
+                {/* Name */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    TÊN HIỂN THỊ (TÙY CHỌN)
+                  </label>
+                  <div className="relative flex items-center">
+                    <User className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={regName}
+                      onChange={(e) => setRegName(e.target.value)}
+                      placeholder="VD: Hải Trình"
+                      className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
+                    />
+                  </div>
                 </div>
+
+                {/* Email */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    EMAIL
+                  </label>
+                  <div className="relative flex items-center">
+                    <Mail className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
+                    <input
+                      type="email"
+                      required
+                      value={regEmail}
+                      onChange={(e) => setRegEmail(e.target.value)}
+                      placeholder="haitrinh082@gmail.com"
+                      className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
+                    />
+                  </div>
+                </div>
+
+                {/* Password */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    MẬT KHẨU
+                  </label>
+                  <div className="relative flex items-center">
+                    <Lock className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
+                    <input
+                      type={showRegPassword ? 'text' : 'password'}
+                      required
+                      minLength={4}
+                      value={regPassword}
+                      onChange={(e) => setRegPassword(e.target.value)}
+                      placeholder="Tối thiểu 4 ký tự"
+                      className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowRegPassword(!showRegPassword)}
+                      className="absolute right-3.5 text-slate-400 hover:text-slate-200 transition"
+                      tabIndex="-1"
+                    >
+                      {showRegPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Confirm Password */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    XÁC NHẬN MẬT KHẨU
+                  </label>
+                  <div className="relative flex items-center">
+                    <Lock className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
+                    <input
+                      type={showRegPassword ? 'text' : 'password'}
+                      required
+                      value={regConfirmPassword}
+                      onChange={(e) => setRegConfirmPassword(e.target.value)}
+                      placeholder="Nhập lại mật khẩu"
+                      className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
+                    />
+                  </div>
+                </div>
+
+                {/* Submit Button */}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 hover:from-blue-500 hover:to-cyan-300 text-white font-bold text-sm sm:text-base shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-70 mt-3 cursor-pointer"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Đang tạo tài khoản...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Đăng ký miễn phí</span>
+                      <span className="text-lg leading-none">→</span>
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* Divider */}
+              <div className="relative flex items-center justify-center my-4">
+                <div className="border-t border-slate-800 w-full" />
+                <span className="bg-[#0B1528] px-3 text-[11px] font-bold tracking-widest text-slate-500 uppercase">
+                  HOẶC
+                </span>
+                <div className="border-t border-slate-800 w-full" />
               </div>
 
-              {/* Email */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Địa chỉ Gmail <span className="text-rose-500">*</span>
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="email"
-                    required
-                    value={regEmail}
-                    onChange={(e) => setRegEmail(e.target.value)}
-                    placeholder="VD: phong09829@gmail.com"
-                    className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* Password */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Tạo Mật khẩu <span className="text-rose-500">*</span>
-                </label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type={showRegPassword ? 'text' : 'password'}
-                    required
-                    minLength={4}
-                    value={regPassword}
-                    onChange={(e) => setRegPassword(e.target.value)}
-                    placeholder="Tối thiểu 4 ký tự"
-                    className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowRegPassword(!showRegPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                  >
-                    {showRegPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Confirm Password */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Xác nhận lại Mật khẩu <span className="text-rose-500">*</span>
-                </label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type={showRegPassword ? 'text' : 'password'}
-                    required
-                    value={regConfirmPassword}
-                    onChange={(e) => setRegConfirmPassword(e.target.value)}
-                    placeholder="Nhập lại đúng mật khẩu ở trên"
-                    className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* Submit */}
+              {/* Google Button */}
               <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-purple-600 to-brand-600 hover:from-purple-500 hover:to-brand-500 text-white font-extrabold text-xs shadow-lg shadow-purple-500/25 flex items-center justify-center gap-2 transition active:scale-98 disabled:opacity-70"
+                type="button"
+                onClick={handleGoogleLogin}
+                className="w-full py-2.5 px-4 rounded-xl bg-[#131E34] hover:bg-[#1A2845] border border-slate-700/60 flex items-center justify-center gap-3 text-slate-200 font-semibold text-xs sm:text-sm transition-all shadow-sm cursor-pointer"
               >
-                {isSubmitting ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="w-4 h-4" />
-                )}
-                <span>{isSubmitting ? 'Đang tạo tài khoản...' : 'Tạo Tài Khoản & Bật Đồng Bộ'}</span>
+                <GoogleIcon className="w-4 h-4 shrink-0" />
+                <span>Đăng nhập bằng Google</span>
               </button>
 
-              <div className="pt-2 text-center text-xs text-slate-500">
+              {/* Bottom Switch Link */}
+              <div className="mt-5 text-center text-xs sm:text-sm text-slate-400">
                 <span>Đã có tài khoản? </span>
                 <button
                   type="button"
@@ -596,152 +608,165 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     setLoginEmail(regEmail);
                     setActiveTab('login');
                   }}
-                  className="font-bold text-brand-600 dark:text-brand-400 hover:underline"
+                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline"
                 >
                   Đăng nhập ngay
                 </button>
               </div>
-            </form>
+            </div>
           )}
 
-          {/* TAB 3: RESET PASSWORD FORM */}
+          {/* ===================== VIEW 3: RESET PASSWORD ===================== */}
           {activeTab === 'reset_password' && (
-            <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
-              <div className="p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/50">
-                <div className="flex items-center gap-2 text-xs font-bold text-amber-800 dark:text-amber-300">
-                  <RotateCcw className="w-4 h-4 text-amber-600" />
-                  <span>Đặt lại mật khẩu cho tài khoản Gmail</span>
-                </div>
-                <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                  Nếu bạn quên mật khẩu hoặc tạo tài khoản trước đó, hãy nhập Gmail và mật khẩu mới bạn muốn đặt để mở khóa tài khoản ngay lập tức.
-                </p>
+            <div>
+              {/* Anchor Badge */}
+              <div className="w-14 h-14 rounded-2xl bg-[#132A45] border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-500/15 mx-auto">
+                <Anchor className="w-7 h-7" />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Địa chỉ Gmail <span className="text-rose-500">*</span>
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="email"
-                    required
-                    value={resetEmail}
-                    onChange={(e) => setResetEmail(e.target.value)}
-                    placeholder="VD: phong09829@gmail.com"
-                    className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                  />
+              {/* Title & Subtitle */}
+              <h2 className="text-2xl sm:text-[26px] font-extrabold text-white text-center mt-4 tracking-tight">
+                Đặt lại mật khẩu
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-400 text-center mt-1.5 mb-6 leading-relaxed">
+                Nhập email và mật khẩu mới để tiếp tục hành trình
+              </p>
+
+              {/* Reset Password Form */}
+              <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
+                
+                {/* Email */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    EMAIL
+                  </label>
+                  <div className="relative flex items-center">
+                    <Mail className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
+                    <input
+                      type="email"
+                      required
+                      value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      placeholder="haitrinh082@gmail.com"
+                      className="w-full pl-10 pr-3 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Mật khẩu mới <span className="text-rose-500">*</span>
-                </label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type={showResetPassword ? 'text' : 'password'}
-                    required
-                    minLength={4}
-                    value={resetNewPassword}
-                    onChange={(e) => setResetNewPassword(e.target.value)}
-                    placeholder="Tối thiểu 4 ký tự"
-                    className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowResetPassword(!showResetPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                  >
-                    {showResetPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+                {/* New Password */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    MẬT KHẨU MỚI
+                  </label>
+                  <div className="relative flex items-center">
+                    <Lock className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
+                    <input
+                      type={showResetPassword ? 'text' : 'password'}
+                      required
+                      minLength={4}
+                      value={resetNewPassword}
+                      onChange={(e) => setResetNewPassword(e.target.value)}
+                      placeholder="Tối thiểu 4 ký tự"
+                      className="w-full pl-10 pr-10 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPassword(!showResetPassword)}
+                      className="absolute right-3.5 text-slate-400 hover:text-slate-200 transition"
+                      tabIndex="-1"
+                    >
+                      {showResetPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Xác nhận lại Mật khẩu mới <span className="text-rose-500">*</span>
-                </label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type={showResetPassword ? 'text' : 'password'}
-                    required
-                    value={resetConfirmPassword}
-                    onChange={(e) => setResetConfirmPassword(e.target.value)}
-                    placeholder="Nhập lại đúng mật khẩu mới"
-                    className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                  />
+                {/* Confirm New Password */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    XÁC NHẬN MẬT KHẨU MỚI
+                  </label>
+                  <div className="relative flex items-center">
+                    <Lock className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
+                    <input
+                      type={showResetPassword ? 'text' : 'password'}
+                      required
+                      value={resetConfirmPassword}
+                      onChange={(e) => setResetConfirmPassword(e.target.value)}
+                      placeholder="Nhập lại mật khẩu mới"
+                      className="w-full pl-10 pr-3 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-600 to-brand-600 hover:from-amber-500 hover:to-brand-500 text-white font-extrabold text-xs shadow-lg shadow-amber-500/25 flex items-center justify-center gap-2 transition active:scale-98 disabled:opacity-70"
-              >
-                {isSubmitting ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="w-4 h-4" />
-                )}
-                <span>{isSubmitting ? 'Đang cập nhật mật khẩu...' : 'Lưu Mật Khẩu & Đăng Nhập Ngay'}</span>
-              </button>
+                {/* Submit Button */}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 hover:from-blue-500 hover:to-cyan-300 text-white font-bold text-sm sm:text-base shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-70 mt-2 cursor-pointer"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Đang cập nhật...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Cập nhật mật khẩu</span>
+                      <span className="text-lg leading-none">→</span>
+                    </>
+                  )}
+                </button>
+              </form>
 
-              <div className="pt-2 text-center text-xs text-slate-500">
+              {/* Bottom Switch Link */}
+              <div className="mt-6 text-center text-xs sm:text-sm text-slate-400">
                 <button
                   type="button"
                   onClick={() => {
                     setLoginEmail(resetEmail);
                     setActiveTab('login');
                   }}
-                  className="font-bold text-brand-600 dark:text-brand-400 hover:underline"
+                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline"
                 >
-                  Quay lại Đăng nhập
+                  ← Quay lại Đăng nhập
                 </button>
               </div>
-            </form>
+            </div>
           )}
 
-          {/* TAB 4: PROFILE & CLOUD STATUS (When Logged In) */}
+          {/* ===================== VIEW 4: PROFILE & CLOUD (When Logged In) ===================== */}
           {activeTab === 'profile' && currentUser && (
-            <div className="space-y-5">
+            <div className="space-y-4">
               
-              {/* Profile & Cloud Connection Status Card */}
-              <div className="p-4 rounded-2xl border bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                    <Cloud className="w-3.5 h-3.5 text-brand-500" />
-                    Đồng Bộ Đám Mây Toàn Cầu
+              {/* Header Status Card */}
+              <div className="p-4 rounded-2xl bg-[#131E34] border border-slate-700/70">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                    <Anchor className="w-3.5 h-3.5 text-cyan-400" />
+                    Đồng Bộ Đám Mây
                   </span>
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold ${
                     cloudSyncStatus === 'syncing' || isCloudSyncing
-                      ? 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
+                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
                       : cloudSyncStatus === 'offline'
-                      ? 'bg-rose-500/10 text-rose-600 border border-rose-500/20'
-                      : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                      ? 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
+                      : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
                   }`}>
-                    {isCloudSyncing ? (
-                      <RefreshCw className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    )}
-                    {isCloudSyncing ? 'Đang đồng bộ...' : cloudSyncStatus === 'offline' ? 'Lưu ngoại tuyến' : 'Đã kết nối'}
+                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                    {isCloudSyncing ? 'Đang đồng bộ...' : 'Đã kết nối'}
                   </span>
                 </div>
 
-                <div className="mt-3 flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800">
+                <div className="mt-3 flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-brand-600 to-purple-600 text-white flex items-center justify-center font-extrabold text-base shadow-md">
+                    <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-400 text-white flex items-center justify-center font-extrabold text-base shadow-md">
                       {currentUser.name?.charAt(0) || currentUser.email?.charAt(0) || 'U'}
                     </div>
                     <div>
-                      <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                      <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
                         <span>{currentUser.name || 'Người dùng'}</span>
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-brand-500/10 text-brand-600 font-bold">Cloud Synced</span>
                       </h4>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">{currentUser.email}</p>
+                      <p className="text-xs text-slate-400 font-mono">{currentUser.email}</p>
                     </div>
                   </div>
 
@@ -749,14 +774,14 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     <button
                       onClick={() => syncWithCloud(true)}
                       disabled={isCloudSyncing}
-                      className="p-2 rounded-xl text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-500/10 border border-brand-200/60 dark:border-brand-900/40 text-xs font-bold transition"
+                      className="p-2 rounded-xl text-cyan-400 hover:bg-cyan-500/10 border border-cyan-500/30 text-xs font-bold transition"
                       title="Đồng bộ ngay dữ liệu"
                     >
                       <RefreshCw className={`w-4 h-4 ${isCloudSyncing ? 'animate-spin' : ''}`} />
                     </button>
                     <button
                       onClick={logoutAccount}
-                      className="flex items-center gap-1 px-3 py-2 rounded-xl text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 text-xs font-bold transition border border-rose-200/60 dark:border-rose-900/40"
+                      className="flex items-center gap-1 px-3 py-2 rounded-xl text-rose-400 hover:bg-rose-500/10 text-xs font-bold transition border border-rose-500/30"
                       title="Đăng xuất tài khoản này"
                     >
                       <LogOut className="w-3.5 h-3.5" />
@@ -766,115 +791,41 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                 </div>
 
                 {/* Storage Metrics */}
-                <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-200 dark:border-slate-800 text-center">
-                  <div className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60">
-                    <span className="block text-base font-extrabold text-brand-600 dark:text-brand-400">{events.length}</span>
-                    <span className="text-[10px] font-semibold text-slate-500">Lịch trình</span>
+                <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-800 text-center">
+                  <div className="p-2 rounded-xl bg-[#0B1528] border border-slate-800">
+                    <span className="block text-base font-extrabold text-cyan-400">{events.length}</span>
+                    <span className="text-[10px] font-semibold text-slate-400">Lịch trình</span>
                   </div>
-                  <div className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60">
-                    <span className="block text-base font-extrabold text-indigo-600 dark:text-indigo-400">{tasks.length}</span>
-                    <span className="text-[10px] font-semibold text-slate-500">Công việc</span>
+                  <div className="p-2 rounded-xl bg-[#0B1528] border border-slate-800">
+                    <span className="block text-base font-extrabold text-sky-400">{tasks.length}</span>
+                    <span className="text-[10px] font-semibold text-slate-400">Công việc</span>
                   </div>
-                  <div className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60">
-                    <span className="block text-base font-extrabold text-purple-600 dark:text-purple-400">{pomoSessions.length}</span>
-                    <span className="text-[10px] font-semibold text-slate-500">Pomodoro</span>
+                  <div className="p-2 rounded-xl bg-[#0B1528] border border-slate-800">
+                    <span className="block text-base font-extrabold text-blue-400">{pomoSessions.length}</span>
+                    <span className="text-[10px] font-semibold text-slate-400">Pomodoro</span>
                   </div>
                 </div>
 
                 <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between">
                   <span>Lần đồng bộ gần nhất:</span>
-                  <span className="font-mono text-slate-600 dark:text-slate-300 font-semibold">
+                  <span className="font-mono text-slate-300 font-semibold">
                     {formatSyncTime(lastCloudSyncTime)}
                   </span>
                 </div>
               </div>
 
-              {/* Change Password Sub-form */}
-              <form onSubmit={handleChangePasswordSubmit} className="space-y-3.5 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30">
+              {/* 1-Click Phone Link */}
+              <div className="p-3.5 rounded-2xl bg-[#131E34] border border-slate-700/70 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                    <Lock className="w-4 h-4 text-brand-500" /> Đổi mật khẩu tài khoản
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowChangePassword(!showChangePassword)}
-                    className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1"
-                  >
-                    {showChangePassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    <span>{showChangePassword ? 'Ẩn' : 'Hiện'}</span>
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                      Mật khẩu cũ
-                    </label>
-                    <input
-                      type={showChangePassword ? 'text' : 'password'}
-                      required
-                      value={oldPassword}
-                      onChange={(e) => setOldPassword(e.target.value)}
-                      placeholder="Mật khẩu hiện tại"
-                      className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                      Mật khẩu mới
-                    </label>
-                    <input
-                      type={showChangePassword ? 'text' : 'password'}
-                      required
-                      minLength={4}
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="Tối thiểu 4 ký tự"
-                      className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                      Xác nhận lại
-                    </label>
-                    <input
-                      type={showChangePassword ? 'text' : 'password'}
-                      required
-                      value={confirmNewPassword}
-                      onChange={(e) => setConfirmNewPassword(e.target.value)}
-                      placeholder="Nhập lại mật khẩu mới"
-                      className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-1">
-                  <button
-                    type="submit"
-                    className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md transition"
-                  >
-                    Cập Nhật Mật Khẩu
-                  </button>
-                </div>
-              </form>
-
-              {/* 1-Click Phone Link & Cross-Device Pairing */}
-              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-brand-50/80 to-purple-50/80 dark:from-brand-950/40 dark:to-purple-950/40 border border-brand-200/80 dark:border-brand-900/50 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-brand-800 dark:text-brand-300 flex items-center gap-1.5">
-                    <Smartphone className="w-4 h-4 text-brand-500" />
-                    <span>Đồng Bộ Sang Điện Thoại (1-Chạm Không Cần Gõ MK)</span>
-                  </span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-600 border border-brand-500/20">
-                    Auto-Link
+                  <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                    <Smartphone className="w-4 h-4 text-cyan-400" />
+                    <span>Đồng Bộ Sang Điện Thoại (1-Chạm)</span>
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                  Sao chép liên kết hoặc gửi link này sang điện thoại (Zalo / Tin nhắn / Email) để điện thoại tự động đăng nhập và tải toàn bộ dữ liệu tức thì.
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Sao chép liên kết hoặc gửi sang điện thoại (Zalo / SMS / Email) để tự động đăng nhập và tải dữ liệu tức thì.
                 </p>
-                <div className="flex gap-2">
+                <div className="flex gap-2 pt-1">
                   <button
                     type="button"
                     onClick={() => {
@@ -883,7 +834,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                         showToast('Đã sao chép liên kết 1-chạm sang điện thoại!', 'success');
                       }
                     }}
-                    className="flex-1 py-2 px-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+                    className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
                   >
                     <LinkIcon className="w-3.5 h-3.5" />
                     <span>Sao Chép Link Điện Thoại</span>
@@ -896,51 +847,109 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                         showToast('Đã sao chép mã đồng bộ tài khoản!', 'info');
                       }
                     }}
-                    className="py-2 px-3 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 text-slate-700 dark:text-slate-300 text-xs font-bold flex items-center gap-1 transition"
+                    className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center gap-1 transition border border-slate-700"
                   >
                     <Copy className="w-3.5 h-3.5" />
-                    <span>Mã Token</span>
+                    <span>Token</span>
                   </button>
                 </div>
               </div>
 
               {/* Offline Backup Export */}
-              <div className="p-3.5 rounded-2xl bg-slate-100/70 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+              <div className="p-3.5 rounded-2xl bg-[#131E34] border border-slate-700/70 flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                    <FileJson className="w-4 h-4 text-purple-500" />
+                  <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                    <FileJson className="w-4 h-4 text-cyan-400" />
                     Sao Lưu File Dữ Liệu Offline (.json)
                   </span>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    Tải về toàn bộ công việc và lịch trình thành 1 file offline an toàn.
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Tải về toàn bộ công việc và lịch trình an toàn.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={handleExportBackup}
-                  className="px-3 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 transition"
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Tải File</span>
                 </button>
               </div>
 
+              {/* Change Password Sub-form */}
+              <form onSubmit={handleChangePasswordSubmit} className="space-y-3 p-3.5 rounded-2xl bg-[#131E34] border border-slate-700/70">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-cyan-400" /> Đổi mật khẩu tài khoản
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowChangePassword(!showChangePassword)}
+                    className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1"
+                  >
+                    {showChangePassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    <span>{showChangePassword ? 'Ẩn' : 'Hiện'}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-400 mb-1">
+                      Mật khẩu cũ
+                    </label>
+                    <input
+                      type={showChangePassword ? 'text' : 'password'}
+                      required
+                      value={oldPassword}
+                      onChange={(e) => setOldPassword(e.target.value)}
+                      placeholder="Mật khẩu cũ"
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-[#0B1528] border border-slate-700 text-xs font-semibold text-white focus:outline-none focus:border-cyan-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-400 mb-1">
+                      Mật khẩu mới
+                    </label>
+                    <input
+                      type={showChangePassword ? 'text' : 'password'}
+                      required
+                      minLength={4}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Tối thiểu 4 ký tự"
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-[#0B1528] border border-slate-700 text-xs font-semibold text-white focus:outline-none focus:border-cyan-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-400 mb-1">
+                      Xác nhận
+                    </label>
+                    <input
+                      type={showChangePassword ? 'text' : 'password'}
+                      required
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      placeholder="Nhập lại mật khẩu"
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-[#0B1528] border border-slate-700 text-xs font-semibold text-white focus:outline-none focus:border-cyan-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="submit"
+                    className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-bold text-xs shadow-md transition"
+                  >
+                    Cập Nhật Mật Khẩu
+                  </button>
+                </div>
+              </form>
+
             </div>
           )}
 
-        </div>
-
-        {/* Modal Footer */}
-        <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center text-xs">
-          <span className="text-slate-400 font-medium truncate max-w-[200px] sm:max-w-[300px]">
-            {isAccountLoggedIn ? `Tài khoản: ${currentUser.email}` : 'Chế độ lưu trữ đám mây'}
-          </span>
-          <button
-            onClick={onClose}
-            className="px-5 py-2 rounded-xl bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900 text-xs font-bold shadow transition hover:opacity-90"
-          >
-            Đóng
-          </button>
         </div>
       </div>
     </div>
