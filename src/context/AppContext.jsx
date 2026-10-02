@@ -379,18 +379,37 @@ export const AppProvider = ({ children }) => {
     }
   }, [events, tasks, pomoSessions, settings, showToast]);
 
-  // Login with Gmail + Password (Downloads user cloud data automatically)
-  const loginAccount = useCallback(async ({ email, password }) => {
+  // Login with Gmail + Password (Downloads user cloud data automatically or auto-registers on first login)
+  const loginAccount = useCallback(async ({ email, password, name = null }) => {
     setIsCloudSyncing(true);
     try {
-      const res = await loginCloudAccount({ email, password });
+      let res = await loginCloudAccount({ email, password });
+      
+      // If user has not registered this Gmail yet, automatically register and sign them in smoothly!
+      if (!res.ok && (res.errorType === 'USER_NOT_FOUND' || res.message?.includes('chưa được đăng ký'))) {
+        const autoReg = await registerCloudAccount({
+          email,
+          password,
+          name: name || email.split('@')[0],
+          initialData: {
+            tasks,
+            events,
+            pomoSessions,
+            settings,
+          }
+        });
+        if (autoReg.ok) {
+          res = autoReg;
+        }
+      }
+
       if (!res.ok) {
         showToast(res.message, 'error');
         return res;
       }
 
       const user = res.user;
-      const data = res.data;
+      const data = res.data || {};
 
       setCurrentUserState(user);
 
@@ -414,7 +433,16 @@ export const AppProvider = ({ children }) => {
       setCloudSyncStatus('synced');
       setLastCloudSyncTime(new Date().toISOString());
 
-      showToast(`Đăng nhập thành công! Đã đồng bộ ${userTasks.length} công việc & ${userEvents.length} lịch trình.`, 'success', 4000);
+      // Navigate straight to Schedule (Calendar)
+      setActiveTab('calendar');
+
+      confetti({
+        particleCount: 70,
+        spread: 60,
+        origin: { y: 0.6 }
+      });
+
+      showToast(`🎉 Đăng nhập thành công! Chào mừng ${user.name || user.email} vào tài khoản Schedule.`, 'success', 4000);
       return res;
     } catch (err) {
       console.error('Login account error:', err);
@@ -423,7 +451,7 @@ export const AppProvider = ({ children }) => {
     } finally {
       setIsCloudSyncing(false);
     }
-  }, [showToast]);
+  }, [events, tasks, pomoSessions, settings, showToast, setActiveTab]);
 
   // Reset Password for any Gmail
   const resetAccountPassword = useCallback(async ({ email, newPassword }) => {

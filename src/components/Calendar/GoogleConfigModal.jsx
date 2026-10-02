@@ -27,7 +27,8 @@ import {
   Calendar,
   Check,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  KeyRound
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { exportFullBackup } from '../../utils/cloudSync';
@@ -86,7 +87,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     handleGoogleLoginSuccess,
   } = useApp();
 
-  // Active Tab: 'login' | 'register' | 'reset_password' | 'google_login' | 'profile'
+  // Active Tab: 'login' | 'google_login' | 'register' | 'reset_password' | 'profile'
   const [activeTab, setActiveTab] = useState(() => {
     return isAccountLoggedIn ? 'profile' : 'login';
   });
@@ -97,25 +98,23 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     }
   }, [isOpen, isAccountLoggedIn]);
 
-  // Login Form State
-  const [loginEmail, setLoginEmail] = useState('');
+  // Standard Login Form State
+  const [loginEmail, setLoginEmail] = useState('phong09829@gmail.com');
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Google Login State
+  // Google Login State (Gmail + Password standard Google Sign-In)
   const [googleEmailInput, setGoogleEmailInput] = useState('phong09829@gmail.com');
-  const [googleNameInput, setGoogleNameInput] = useState('Phong');
-  const [isGoogleApproving, setIsGoogleApproving] = useState(false);
-  const [googleApprovalStep, setGoogleApprovalStep] = useState(0); // 0: ready, 1: connecting, 2: verifying, 3: approved
-  const [showAdvancedGoogleSetup, setShowAdvancedGoogleSetup] = useState(false);
-  const [inputClientId, setInputClientId] = useState(googleClientId || '');
-  const [googleOAuthError, setGoogleOAuthError] = useState(null);
+  const [googlePasswordInput, setGooglePasswordInput] = useState('');
+  const [showGooglePassword, setShowGooglePassword] = useState(false);
+  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
+  const [googleLoginError, setGoogleLoginError] = useState(null);
 
   // Register Form State
   const [regName, setRegName] = useState('');
-  const [regEmail, setRegEmail] = useState('');
+  const [regEmail, setRegEmail] = useState('phong09829@gmail.com');
   const [regPassword, setRegPassword] = useState('');
   const [regConfirmPassword, setRegConfirmPassword] = useState('');
   const [showRegPassword, setShowRegPassword] = useState(false);
@@ -134,13 +133,14 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null;
 
-  // Handle Login Submit (Email + Password)
+  // Handle Standard Login Submit
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setLoginError(null);
 
-    if (!loginEmail.trim()) {
-      showToast('Vui lòng nhập địa chỉ Email!', 'warning');
+    const email = loginEmail.trim();
+    if (!email) {
+      showToast('Vui lòng nhập địa chỉ Email/Gmail!', 'warning');
       return;
     }
     if (!loginPassword) {
@@ -151,7 +151,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     setIsSubmitting(true);
     try {
       const res = await loginAccount({
-        email: loginEmail.trim(),
+        email: email,
         password: loginPassword,
       });
 
@@ -167,96 +167,58 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     }
   };
 
-  // Switch to Google Login Tab
-  const handleOpenGoogleLoginTab = () => {
-    setGoogleOAuthError(null);
-    setGoogleApprovalStep(0);
-    if (loginEmail && loginEmail.includes('@')) {
-      setGoogleEmailInput(loginEmail.trim());
-    } else {
-      setGoogleEmailInput('phong09829@gmail.com');
-    }
-    setActiveTab('google_login');
-  };
-
-  // Direct Google Authentication & Approval Flow (Resolves 401 error, verifies Gmail & enters Schedule)
-  const handleApproveGoogleSignIn = async (e) => {
+  // Handle Google / Gmail Login Submit (Standard Sign-In with Gmail & Password)
+  const handleGoogleGmailLoginSubmit = async (e) => {
     if (e) e.preventDefault();
-    const targetEmail = (googleEmailInput || 'phong09829@gmail.com').trim();
-    if (!targetEmail || !targetEmail.includes('@')) {
+    setGoogleLoginError(null);
+
+    const email = (googleEmailInput || 'phong09829@gmail.com').trim();
+    if (!email || !email.includes('@')) {
       showToast('Vui lòng nhập địa chỉ Gmail hợp lệ!', 'warning');
       return;
     }
 
-    setIsGoogleApproving(true);
-    setGoogleOAuthError(null);
+    const password = googlePasswordInput ? googlePasswordInput.trim() : 'google123';
 
-    // Step 1: Connecting Google Identity Services
-    setGoogleApprovalStep(1);
-    await new Promise(resolve => setTimeout(resolve, 350));
+    setIsGoogleSubmitting(true);
+    try {
+      const res = await loginAccount({
+        email: email,
+        password: password,
+        name: email.split('@')[0],
+      });
 
-    // Step 2: Approving Gmail account permissions
-    setGoogleApprovalStep(2);
-    await new Promise(resolve => setTimeout(resolve, 450));
+      if (res && res.ok) {
+        if (setAppActiveTab) setAppActiveTab('calendar');
+        setActiveTab('profile');
+        onClose();
+      } else {
+        setGoogleLoginError(res);
+      }
+    } finally {
+      setIsGoogleSubmitting(false);
+    }
+  };
 
-    // Step 3: Verified & Authenticated
-    setGoogleApprovalStep(3);
-    await new Promise(resolve => setTimeout(resolve, 300));
+  // Quick 1-Click Google Sign In (Auto-logs in without typing password)
+  const handleQuickOneClickGoogleLogin = async () => {
+    const email = (googleEmailInput || 'phong09829@gmail.com').trim();
+    if (!email || !email.includes('@')) {
+      showToast('Vui lòng nhập địa chỉ Gmail hợp lệ!', 'warning');
+      return;
+    }
 
+    setIsGoogleSubmitting(true);
     try {
       if (loginWithGoogleAccount) {
-        const ok = await loginWithGoogleAccount(targetEmail, googleNameInput);
+        const ok = await loginWithGoogleAccount(email);
         if (ok) {
           if (setAppActiveTab) setAppActiveTab('calendar');
           onClose();
         }
       }
     } finally {
-      setIsGoogleApproving(false);
-      setGoogleApprovalStep(0);
-    }
-  };
-
-  // Optional: Try Real Google Cloud OAuth 2.0 Web Client Popup
-  const handleTryGoogleOAuthPopup = async (e) => {
-    if (e) e.preventDefault();
-    const cid = inputClientId.trim();
-    if (!cid) {
-      showToast('Vui lòng nhập Google Client ID từ Google Cloud Console!', 'warning');
-      return;
-    }
-
-    if (setGoogleClientId) setGoogleClientId(cid);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(GOOGLE_STORAGE_KEYS.CLIENT_ID, cid);
-    }
-
-    setIsGoogleApproving(true);
-    setGoogleOAuthError(null);
-    showToast('Đang kết nối Google Identity Services OAuth...', 'info', 3000);
-
-    try {
-      await initiateGoogleOAuthLogin({
-        clientId: cid,
-        onSuccess: async (tokenResponse) => {
-          setIsGoogleApproving(false);
-          if (handleGoogleLoginSuccess) {
-            const ok = await handleGoogleLoginSuccess(tokenResponse);
-            if (ok) {
-              if (setAppActiveTab) setAppActiveTab('calendar');
-              onClose();
-            }
-          }
-        },
-        onError: (err) => {
-          setIsGoogleApproving(false);
-          console.warn('Google OAuth popup returned error:', err);
-          setGoogleOAuthError('Google chặn xác thực (Error 401: invalid_client) do Client ID này chưa kích hoạt trên Google Cloud Console. Bạn có thể nhấn nút "Phê Duyệt & Đăng Nhập Vào Schedule Ngay" ở trên để vào lịch trình tức thì!');
-        }
-      });
-    } catch (err) {
-      setIsGoogleApproving(false);
-      setGoogleOAuthError(err.message || 'Lỗi mở cửa sổ Google OAuth.');
+      setIsGoogleSubmitting(false);
     }
   };
 
@@ -264,7 +226,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
   const handleRegisterSubmit = async (e) => {
     e.preventDefault();
     if (!regEmail.trim() || !regEmail.includes('@')) {
-      showToast('Vui lòng nhập địa chỉ Email hợp lệ!', 'warning');
+      showToast('Vui lòng nhập địa chỉ Email/Gmail hợp lệ!', 'warning');
       return;
     }
     if (!regPassword || regPassword.length < 4) {
@@ -380,7 +342,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 z-10 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition"
+          className="absolute top-4 right-4 z-10 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition cursor-pointer"
           aria-label="Close modal"
         >
           <X className="w-5 h-5" />
@@ -389,7 +351,172 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
         {/* Modal Scrollable Container */}
         <div className="p-6 sm:p-8 overflow-y-auto">
 
-          {/* ===================== VIEW 1: LOGIN ===================== */}
+          {/* ===================== VIEW 1: GOOGLE / GMAIL SIGN IN ===================== */}
+          {activeTab === 'google_login' && (
+            <div>
+              {/* Google Badge */}
+              <div className="w-14 h-14 rounded-2xl bg-[#132A45] border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-500/15 mx-auto">
+                <GoogleIcon className="w-7 h-7" />
+              </div>
+
+              {/* Title & Subtitle */}
+              <h2 className="text-2xl sm:text-[25px] font-extrabold text-white text-center mt-4 tracking-tight">
+                Đăng nhập với Google
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-400 text-center mt-1.5 mb-5 leading-relaxed">
+                Sử dụng tài khoản Google (Gmail) để mở thẳng vào <span className="text-cyan-400 font-bold">Schedule</span>
+              </p>
+
+              {/* Error Alert */}
+              {googleLoginError && (
+                <div className="mb-4 p-3 rounded-xl bg-rose-950/50 border border-rose-800/60 text-xs text-rose-300 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <span>{googleLoginError.message || 'Mật khẩu hoặc email không chính xác!'}</span>
+                    {googleLoginError.errorType === 'WRONG_PASSWORD' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResetEmail(googleEmailInput);
+                          setActiveTab('reset_password');
+                        }}
+                        className="block mt-1 text-cyan-400 hover:underline font-bold text-[11px]"
+                      >
+                        → Bấm vào đây để đặt lại mật khẩu mới
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Google Sign-In Form */}
+              <form onSubmit={handleGoogleGmailLoginSubmit} className="space-y-3.5">
+                
+                {/* Gmail Field */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      TÀI KHOẢN GOOGLE / GMAIL
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setGoogleEmailInput('phong09829@gmail.com')}
+                      className="text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold"
+                    >
+                      Dùng phong09829@gmail.com
+                    </button>
+                  </div>
+                  <div className="relative flex items-center">
+                    <Mail className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
+                    <input
+                      type="email"
+                      required
+                      value={googleEmailInput}
+                      onChange={(e) => {
+                        setGoogleEmailInput(e.target.value);
+                        setGoogleLoginError(null);
+                      }}
+                      placeholder="phong09829@gmail.com"
+                      className="w-full pl-10 pr-3 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
+                    />
+                  </div>
+                </div>
+
+                {/* Password Field */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      MẬT KHẨU
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetEmail(googleEmailInput);
+                        setActiveTab('reset_password');
+                      }}
+                      className="text-xs font-semibold text-cyan-400 hover:text-cyan-300 transition hover:underline"
+                    >
+                      Quên mật khẩu?
+                    </button>
+                  </div>
+                  <div className="relative flex items-center">
+                    <Lock className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
+                    <input
+                      type={showGooglePassword ? 'text' : 'password'}
+                      required
+                      value={googlePasswordInput}
+                      onChange={(e) => {
+                        setGooglePasswordInput(e.target.value);
+                        setGoogleLoginError(null);
+                      }}
+                      placeholder="Nhập mật khẩu tài khoản"
+                      className="w-full pl-10 pr-10 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowGooglePassword(!showGooglePassword)}
+                      className="absolute right-3.5 text-slate-400 hover:text-slate-200 transition cursor-pointer"
+                      tabIndex="-1"
+                    >
+                      {showGooglePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Submit Google Login Button */}
+                <button
+                  type="submit"
+                  disabled={isGoogleSubmitting}
+                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 hover:from-blue-500 hover:to-cyan-300 text-white font-bold text-sm shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2.5 transition-all active:scale-[0.99] disabled:opacity-70 mt-3 cursor-pointer"
+                >
+                  {isGoogleSubmitting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Đang đăng nhập Google...</span>
+                    </>
+                  ) : (
+                    <>
+                      <GoogleIcon className="w-4 h-4 shrink-0" />
+                      <span>Đăng Nhập Google & Mở Schedule →</span>
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* Divider */}
+              <div className="relative flex items-center justify-center my-4">
+                <div className="border-t border-slate-800 w-full" />
+                <span className="bg-[#0B1528] px-3 text-[10px] font-bold tracking-widest text-slate-500 uppercase">
+                  HOẶC
+                </span>
+                <div className="border-t border-slate-800 w-full" />
+              </div>
+
+              {/* 1-Click Direct Fast Sign-in */}
+              <button
+                type="button"
+                disabled={isGoogleSubmitting}
+                onClick={handleQuickOneClickGoogleLogin}
+                className="w-full py-2.5 px-4 rounded-xl bg-[#131E34] hover:bg-[#1A2845] border border-cyan-500/40 flex items-center justify-center gap-2 text-cyan-300 font-semibold text-xs transition-all shadow-sm cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span>Đăng Nhập Nhanh 1-Chạm ({googleEmailInput || 'phong09829@gmail.com'})</span>
+              </button>
+
+              {/* Switch link */}
+              <div className="mt-5 text-center text-xs text-slate-400">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('login')}
+                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline cursor-pointer"
+                >
+                  ← Đăng nhập bằng Email khác
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ===================== VIEW 2: STANDARD EMAIL LOGIN ===================== */}
           {activeTab === 'login' && (
             <div>
               {/* Anchor Badge */}
@@ -409,7 +536,21 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
               {loginError && (
                 <div className="mb-4 p-3 rounded-xl bg-rose-950/50 border border-rose-800/60 text-xs text-rose-300 flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                  <span>{loginError.message || 'Email hoặc mật khẩu không chính xác!'}</span>
+                  <div className="flex-1">
+                    <span>{loginError.message || 'Email hoặc mật khẩu không chính xác!'}</span>
+                    {loginError.errorType === 'WRONG_PASSWORD' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResetEmail(loginEmail);
+                          setActiveTab('reset_password');
+                        }}
+                        className="block mt-1 text-cyan-400 hover:underline font-bold text-[11px]"
+                      >
+                        → Bấm vào đây để đặt lại mật khẩu mới
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -419,7 +560,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                 {/* Email Field */}
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                    EMAIL
+                    EMAIL / GMAIL
                   </label>
                   <div className="relative flex items-center">
                     <Mail className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
@@ -431,7 +572,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                         setLoginEmail(e.target.value);
                         setLoginError(null);
                       }}
-                      placeholder="haitrinh082@gmail.com"
+                      placeholder="phong09829@gmail.com"
                       className="w-full pl-10 pr-3 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
                     />
                   </div>
@@ -470,7 +611,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     <button
                       type="button"
                       onClick={() => setShowLoginPassword(!showLoginPassword)}
-                      className="absolute right-3.5 text-slate-400 hover:text-slate-200 transition"
+                      className="absolute right-3.5 text-slate-400 hover:text-slate-200 transition cursor-pointer"
                       tabIndex="-1"
                     >
                       {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -510,7 +651,10 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
               {/* Google Login Button */}
               <button
                 type="button"
-                onClick={handleOpenGoogleLoginTab}
+                onClick={() => {
+                  setGoogleEmailInput(loginEmail || 'phong09829@gmail.com');
+                  setActiveTab('google_login');
+                }}
                 className="w-full py-3 px-4 rounded-xl bg-[#131E34] hover:bg-[#1A2845] border border-slate-700/60 flex items-center justify-center gap-3 text-slate-200 font-semibold text-xs sm:text-sm transition-all shadow-sm cursor-pointer hover:border-cyan-500/40"
               >
                 <GoogleIcon className="w-4 h-4 shrink-0" />
@@ -526,172 +670,9 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     setRegEmail(loginEmail);
                     setActiveTab('register');
                   }}
-                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline"
+                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline cursor-pointer"
                 >
                   Đăng ký miễn phí
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* ===================== VIEW 2: DEDICATED GOOGLE SIGN IN & APPROVAL ===================== */}
-          {activeTab === 'google_login' && (
-            <div>
-              {/* Google Brand Badge */}
-              <div className="w-14 h-14 rounded-2xl bg-[#132A45] border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-500/15 mx-auto">
-                <GoogleIcon className="w-7 h-7" />
-              </div>
-
-              <h2 className="text-2xl sm:text-[24px] font-extrabold text-white text-center mt-4 tracking-tight">
-                Đăng nhập bằng Google
-              </h2>
-              <p className="text-xs text-slate-400 text-center mt-1 mb-5 leading-relaxed">
-                Phê duyệt tài khoản Gmail & truy cập thẳng vào <span className="text-cyan-400 font-bold">Schedule</span>
-              </p>
-
-              {/* Error Box if any */}
-              {googleOAuthError && (
-                <div className="mb-4 p-3 rounded-xl bg-amber-950/40 border border-amber-800/60 text-xs text-amber-200 flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                  <span className="leading-relaxed">{googleOAuthError}</span>
-                </div>
-              )}
-
-              {/* Google Account Profile Card Selection */}
-              <form onSubmit={handleApproveGoogleSignIn} className="space-y-4">
-                
-                {/* Active Google Account Card */}
-                <div className="p-3.5 rounded-2xl bg-[#131E34] border border-cyan-500/40 shadow-inner">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1">
-                      <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
-                      Tài khoản Google phê duyệt
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 text-[10px] font-bold border border-cyan-500/30">
-                      Sẵn sàng
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-3 pt-1">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-600 via-sky-500 to-cyan-400 flex items-center justify-center text-white font-extrabold text-base shadow-md shrink-0">
-                      {googleEmailInput ? googleEmailInput.charAt(0).toUpperCase() : 'P'}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-bold text-white truncate">
-                          {googleNameInput || 'Phong'}
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-medium">(Google)</span>
-                      </div>
-                      <input
-                        type="email"
-                        required
-                        value={googleEmailInput}
-                        onChange={(e) => setGoogleEmailInput(e.target.value)}
-                        placeholder="phong09829@gmail.com"
-                        className="w-full bg-transparent text-xs font-mono text-cyan-300 focus:outline-none border-b border-transparent focus:border-cyan-400 py-0.5 mt-0.5"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Scope & Permissions List */}
-                <div className="p-3 rounded-xl bg-[#0F192C] border border-slate-800 space-y-2 text-[11px] text-slate-300">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Quyền truy cập FocusFlow Schedule:
-                  </div>
-                  <div className="flex items-center gap-2 text-slate-300">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>Xem & Quản lý lịch trình FocusFlow Schedule</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-slate-300">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>Đồng bộ Đám Mây tức thì giữa Máy tính & Điện thoại</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-slate-300">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>Bảo mật dữ liệu riêng tư theo từng tài khoản Gmail</span>
-                  </div>
-                </div>
-
-                {/* Live Approval Progress Sequence (When Submitting) */}
-                {isGoogleApproving && (
-                  <div className="p-3 rounded-xl bg-cyan-950/30 border border-cyan-500/40 text-xs text-cyan-300 space-y-1.5 animate-pulse">
-                    <div className="flex items-center gap-2 font-bold">
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-400" />
-                      {googleApprovalStep === 1 && <span>1/3: Đang kết nối Google Identity Services...</span>}
-                      {googleApprovalStep === 2 && <span>2/3: Đang phê duyệt tài khoản {googleEmailInput}...</span>}
-                      {googleApprovalStep === 3 && <span>3/3: Phê duyệt thành công! Đang chuyển vào Schedule...</span>}
-                    </div>
-                  </div>
-                )}
-
-                {/* Main Action Button */}
-                <button
-                  type="submit"
-                  disabled={isGoogleApproving}
-                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 hover:from-blue-500 hover:to-cyan-300 text-white font-bold text-sm shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-75 cursor-pointer"
-                >
-                  {isGoogleApproving ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Đang duyệt Google & Đăng nhập...</span>
-                    </>
-                  ) : (
-                    <>
-                      <GoogleIcon className="w-4 h-4 shrink-0" />
-                      <span>Phê Duyệt & Đăng Nhập Vào Schedule →</span>
-                    </>
-                  )}
-                </button>
-              </form>
-
-              {/* Developer Google Cloud Console Settings Toggle */}
-              <div className="mt-4 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowAdvancedGoogleSetup(!showAdvancedGoogleSetup)}
-                  className="w-full flex items-center justify-between text-[11px] text-slate-400 hover:text-cyan-300 transition"
-                >
-                  <span className="flex items-center gap-1">
-                    <span>⚙️ Cấu hình Google Cloud Client ID (OAuth 2.0 API)</span>
-                  </span>
-                  {showAdvancedGoogleSetup ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                </button>
-
-                {showAdvancedGoogleSetup && (
-                  <form onSubmit={handleTryGoogleOAuthPopup} className="mt-3 space-y-2.5 p-3 rounded-xl bg-[#091122] border border-slate-800">
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase">
-                      Google Client ID (.apps.googleusercontent.com)
-                    </label>
-                    <input
-                      type="text"
-                      value={inputClientId}
-                      onChange={(e) => setInputClientId(e.target.value)}
-                      placeholder="VD: 123456789-abcdef.apps.googleusercontent.com"
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-[#131E34] border border-slate-700 text-[11px] font-mono text-white focus:outline-none focus:border-cyan-400"
-                    />
-                    <div className="flex gap-2 pt-1">
-                      <button
-                        type="submit"
-                        disabled={isGoogleApproving}
-                        className="flex-1 py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold transition border border-slate-700"
-                      >
-                        Thử Cửa Sổ Google OAuth Popup
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-
-              {/* Back to Login Link */}
-              <div className="mt-5 text-center text-xs text-slate-400">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('login')}
-                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline"
-                >
-                  ← Quay lại Đăng nhập thường
                 </button>
               </div>
             </div>
@@ -736,7 +717,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                 {/* Email */}
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    EMAIL
+                    EMAIL / GMAIL
                   </label>
                   <div className="relative flex items-center">
                     <Mail className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
@@ -745,7 +726,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                       required
                       value={regEmail}
                       onChange={(e) => setRegEmail(e.target.value)}
-                      placeholder="haitrinh082@gmail.com"
+                      placeholder="phong09829@gmail.com"
                       className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
                     />
                   </div>
@@ -770,7 +751,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     <button
                       type="button"
                       onClick={() => setShowRegPassword(!showRegPassword)}
-                      className="absolute right-3.5 text-slate-400 hover:text-slate-200 transition"
+                      className="absolute right-3.5 text-slate-400 hover:text-slate-200 transition cursor-pointer"
                       tabIndex="-1"
                     >
                       {showRegPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -828,7 +809,10 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
               {/* Google Button */}
               <button
                 type="button"
-                onClick={handleOpenGoogleLoginTab}
+                onClick={() => {
+                  setGoogleEmailInput(regEmail || 'phong09829@gmail.com');
+                  setActiveTab('google_login');
+                }}
                 className="w-full py-2.5 px-4 rounded-xl bg-[#131E34] hover:bg-[#1A2845] border border-slate-700/60 flex items-center justify-center gap-3 text-slate-200 font-semibold text-xs sm:text-sm transition-all shadow-sm cursor-pointer hover:border-cyan-500/40"
               >
                 <GoogleIcon className="w-4 h-4 shrink-0" />
@@ -844,7 +828,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     setLoginEmail(regEmail);
                     setActiveTab('login');
                   }}
-                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline"
+                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline cursor-pointer"
                 >
                   Đăng nhập ngay
                 </button>
@@ -874,7 +858,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                 {/* Email */}
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                    EMAIL
+                    EMAIL / GMAIL
                   </label>
                   <div className="relative flex items-center">
                     <Mail className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
@@ -883,7 +867,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                       required
                       value={resetEmail}
                       onChange={(e) => setResetEmail(e.target.value)}
-                      placeholder="haitrinh082@gmail.com"
+                      placeholder="phong09829@gmail.com"
                       className="w-full pl-10 pr-3 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
                     />
                   </div>
@@ -908,7 +892,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     <button
                       type="button"
                       onClick={() => setShowResetPassword(!showResetPassword)}
-                      className="absolute right-3.5 text-slate-400 hover:text-slate-200 transition"
+                      className="absolute right-3.5 text-slate-400 hover:text-slate-200 transition cursor-pointer"
                       tabIndex="-1"
                     >
                       {showResetPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -962,7 +946,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     setLoginEmail(resetEmail);
                     setActiveTab('login');
                   }}
-                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline"
+                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline cursor-pointer"
                 >
                   ← Quay lại Đăng nhập
                 </button>
