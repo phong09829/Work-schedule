@@ -35,6 +35,7 @@ import {
 import { soundManager } from '../utils/audio';
 import { GOOGLE_CLIENT_ID } from '../config/authConfig';
 import { signOutGoogle } from '../utils/googleAuth';
+import { saveOtpSession, clearOtpSession, OTP_STORAGE_KEYS } from '../utils/otpAuth';
 import {
   GOOGLE_STORAGE_KEYS,
   DEFAULT_CALENDAR_EVENTS,
@@ -527,6 +528,7 @@ export const AppProvider = ({ children }) => {
   // Logout current user
   const logoutAccount = useCallback(() => {
     signOutGoogle();
+    clearOtpSession();
     setCurrentUser(null);
     setCurrentUserState(null);
     setGoogleUser(null);
@@ -799,6 +801,64 @@ export const AppProvider = ({ children }) => {
       setIsCloudSyncing(false);
     }
   }, [showToast, triggerCloudSync, setActiveTab, registerAccount]);
+
+  // Handle Sign-In with Email OTP Session & JWT
+  const loginWithOtpSession = useCallback(async (jwtToken, userPayload) => {
+    if (!userPayload || !userPayload.email) {
+      showToast('Thông tin người dùng không hợp lệ.', 'error');
+      return false;
+    }
+
+    setIsCloudSyncing(true);
+    try {
+      const cleanEmail = normalizeEmail(userPayload.email);
+      const displayName = userPayload.name || cleanEmail.split('@')[0];
+      const avatarUrl = userPayload.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanEmail}`;
+
+      const activeSession = {
+        id: userPayload.id || `usr-${Date.now()}`,
+        name: displayName,
+        email: cleanEmail,
+        avatar: avatarUrl,
+        provider: 'email_otp',
+        token: jwtToken,
+      };
+
+      saveOtpSession(jwtToken, activeSession);
+
+      // Hydrate user data from local storage or cloud account
+      const userTasks = getUserData(cleanEmail, 'tasks', null);
+      const userEvents = getUserData(cleanEmail, 'events', null);
+      const userPomo = getUserData(cleanEmail, 'pomo_sessions', null);
+      const userSettings = getUserData(cleanEmail, 'settings', null);
+
+      if (userTasks && Array.isArray(userTasks)) setTasks(userTasks);
+      if (userEvents && Array.isArray(userEvents)) setEvents(userEvents);
+      if (userPomo && Array.isArray(userPomo)) setPomoSessions(userPomo);
+      if (userSettings) setSettings(userSettings);
+
+      setCurrentUser(activeSession);
+      setCurrentUserState(activeSession);
+      setCloudSyncStatus('synced');
+      setLastCloudSyncTime(new Date().toISOString());
+
+      confetti({
+        particleCount: 90,
+        spread: 80,
+        origin: { y: 0.6 }
+      });
+
+      showToast(`🎉 Chào mừng ${displayName}! Đăng nhập bằng mã OTP thành công (${cleanEmail}).`, 'success', 5000);
+      triggerCloudSync();
+      return true;
+    } catch (err) {
+      console.error('OTP login processing error:', err);
+      showToast('Có lỗi xảy ra khi hoàn tất đăng nhập OTP.', 'error');
+      return false;
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  }, [showToast, triggerCloudSync]);
 
   // Google OAuth GIS Login Handler
   const handleGoogleLoginSuccess = useCallback(async (tokenResponse) => {
@@ -1471,6 +1531,8 @@ export const AppProvider = ({ children }) => {
         syncWithGoogleCalendar,
         isGoogleSyncing,
         lastSyncTime,
+        // OTP & Auth
+        loginWithOtpSession,
         // Google OAuth & GIS
         googleUser,
         googleToken,

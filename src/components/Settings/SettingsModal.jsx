@@ -13,11 +13,14 @@ import {
   Save,
   Check,
   Shield,
-  Lock,
   Mail,
   User,
-  LogIn,
-import { GoogleIcon } from '../Calendar/GoogleConfigModal';
+  LogOut,
+  Sparkles,
+  CheckCircle2
+} from 'lucide-react';
+import { useApp } from '../../context/AppContext';
+import { soundManager } from '../../utils/audio';
 
 export const SettingsModal = ({ isOpen, onClose }) => {
   const { 
@@ -34,38 +37,6 @@ export const SettingsModal = ({ isOpen, onClose }) => {
 
   const [formData, setFormData] = useState({ ...settings });
   const fileInputRef = useRef(null);
-
-  const handleChangePasswordInline = async () => {
-    if (!oldPass) {
-      showToast('Vui lòng nhập mật khẩu hiện tại!', 'warning');
-      return;
-    }
-    if (!newPass || newPass.length < 4) {
-      showToast('Mật khẩu mới phải có ít nhất 4 ký tự!', 'warning');
-      return;
-    }
-    if (newPass !== confirmPass) {
-      showToast('Xác nhận mật khẩu mới không khớp!', 'warning');
-      return;
-    }
-
-    setIsUpdatingPass(true);
-    try {
-      const res = await changeAccountPassword({
-        oldPassword: oldPass,
-        newPassword: newPass,
-      });
-
-      if (res && res.ok) {
-        setOldPass('');
-        setNewPass('');
-        setConfirmPass('');
-        setShowChangePass(false);
-      }
-    } finally {
-      setIsUpdatingPass(false);
-    }
-  };
 
   if (!isOpen) return null;
 
@@ -103,294 +74,246 @@ export const SettingsModal = ({ isOpen, onClose }) => {
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const parsed = JSON.parse(event.target.result);
-        const success = importData(parsed);
+        const json = JSON.parse(event.target?.result);
+        const success = importData(json);
         if (success) {
           onClose();
         }
       } catch (err) {
-        showToast('File JSON không hợp lệ!', 'error');
+        showToast('File JSON không hợp lệ. Vui lòng kiểm tra lại!', 'error');
       }
     };
     reader.readAsText(file);
   };
 
-  const handleReset = () => {
-    if (window.confirm('Bạn có chắc chắn muốn đặt lại tất cả dữ liệu về mặc định ban đầu không?')) {
-      resetToDefaults();
-      onClose();
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in">
-      <div 
-        className="w-full max-w-xl max-h-[90vh] overflow-y-auto glass-card rounded-2xl shadow-2xl p-6 relative border border-slate-200 dark:border-slate-800"
-        onClick={e => e.stopPropagation()}
-      >
+      <div className="glass-card w-full max-w-lg rounded-3xl shadow-2xl p-6 sm:p-7 border border-slate-200/90 dark:border-slate-800/90 relative max-h-[90vh] overflow-y-auto bg-white/95 dark:bg-slate-900/95">
+        
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 mb-5 border-b border-slate-200 dark:border-slate-800">
+        <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-brand-500/10 text-brand-500">
+            <div className="p-2 rounded-xl bg-brand-500/10 text-brand-600 dark:text-brand-400">
               <SettingsIcon className="w-5 h-5" />
             </div>
-            <h2 className="text-xl font-bold">Cài Đặt Hệ Thống</h2>
+            <div>
+              <h2 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-slate-100">
+                Cài Đặt Hệ Thống
+              </h2>
+              <p className="text-xs text-slate-400">Tùy biến Pomodoro, âm thanh và tài khoản</p>
+            </div>
           </div>
-          <button
+          <button 
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60 transition cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSave} className="space-y-6">
-          {/* Section: Google Account Status */}
-          <div className="p-4 rounded-2xl bg-slate-100/70 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-200">
-                <GoogleIcon className="w-4 h-4" />
-                <span>Tài Khoản Google Đăng Nhập</span>
-              </div>
-              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
-                isAccountLoggedIn
-                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
-              }`}>
-                {isAccountLoggedIn ? 'Đã kết nối Google' : 'Chưa đăng nhập'}
-              </span>
-            </div>
-
-            {isAccountLoggedIn ? (
-              <div className="flex items-center justify-between pt-1">
-                <div className="flex items-center gap-3">
-                  {currentUser?.avatar ? (
-                    <img 
-                      src={currentUser.avatar} 
-                      alt="Avatar" 
-                      className="w-10 h-10 rounded-xl object-cover border border-blue-400/40" 
-                    />
-                  ) : (
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 text-white flex items-center justify-center font-bold text-sm">
-                      {currentUser?.name?.charAt(0) || 'G'}
-                    </div>
-                  )}
-                  <div>
-                    <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{currentUser?.name || 'Người dùng Google'}</p>
-                    <p className="text-[11px] text-slate-500 font-mono">{currentUser?.email}</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    logoutAccount();
-                    onClose();
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold transition flex items-center gap-1 cursor-pointer"
-                >
-                  <LogOut className="w-3.5 h-3.5" /> Đăng xuất
-                </button>
-              </div>
-            ) : (
-              <p className="text-xs text-slate-500 dark:text-slate-400 pt-1">
-                Đăng nhập bằng tài khoản Google (Google Identity Services) để sao lưu và đồng bộ lịch trình tự động.
-              </p>
-            )}
+        {/* Account Status Card */}
+        <div className="mt-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+              <Mail className="w-4 h-4 text-brand-500" />
+              <span>Tài Khoản Đăng Nhập (Email OTP)</span>
+            </span>
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+              isAccountLoggedIn
+                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+            }`}>
+              {isAccountLoggedIn ? 'Đã xác thực OTP' : 'Chưa đăng nhập'}
+            </span>
           </div>
 
-          {/* Section: Pomodoro Timer Settings */}
-          <div>
-            <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-brand-600 dark:text-brand-400">
-              <Clock className="w-4 h-4" />
-              <span>Thời lượng Pomodoro (Phút)</span>
+          {isAccountLoggedIn ? (
+            <div className="flex items-center justify-between pt-1">
+              <div className="flex items-center gap-2.5">
+                <img 
+                  src={currentUser?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser?.email}`} 
+                  alt="Avatar" 
+                  className="w-9 h-9 rounded-xl object-cover border border-emerald-400/50" 
+                />
+                <div>
+                  <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                    {currentUser?.name || currentUser?.email?.split('@')[0]}
+                  </p>
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    {currentUser?.email}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  logoutAccount();
+                  onClose();
+                }}
+                className="px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-bold hover:bg-rose-500/20 transition cursor-pointer flex items-center gap-1"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Đăng xuất</span>
+              </button>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+          ) : (
+            <p className="text-xs text-slate-500">
+              Đăng nhập bằng mã OTP qua Email để tự động lưu trữ và đồng bộ hóa công việc, lịch trình trên mọi thiết bị.
+            </p>
+          )}
+        </div>
+
+        <form onSubmit={handleSave} className="space-y-4 sm:space-y-5 mt-4">
+          {/* Pomodoro Settings */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5" />
+              <span>Thời Gian Pomodoro (Phút)</span>
+            </h3>
+
+            <div className="grid grid-cols-3 gap-2.5">
               <div>
-                <label className="block mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-                  Tập trung (Focus)
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1">
+                  Tập trung
                 </label>
                 <input
                   type="number"
                   min="1"
                   max="120"
                   value={formData.focusDuration}
-                  onChange={e => handleChange('focusDuration', e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  onChange={(e) => handleChange('focusDuration', e.target.value)}
+                  className="w-full px-3 py-2 text-sm font-semibold rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 outline-none focus:border-brand-500"
                 />
               </div>
+
               <div>
-                <label className="block mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-                  Nghỉ ngắn (Short)
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1">
+                  Nghỉ ngắn
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="30"
+                  value={formData.shortBreakDuration}
+                  onChange={(e) => handleChange('shortBreakDuration', e.target.value)}
+                  className="w-full px-3 py-2 text-sm font-semibold rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1">
+                  Nghỉ dài
                 </label>
                 <input
                   type="number"
                   min="1"
                   max="60"
-                  value={formData.shortBreakDuration}
-                  onChange={e => handleChange('shortBreakDuration', e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold focus:outline-none focus:ring-2 focus:ring-brand-500"
-                />
-              </div>
-              <div>
-                <label className="block mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-                  Nghỉ dài (Long)
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="90"
                   value={formData.longBreakDuration}
-                  onChange={e => handleChange('longBreakDuration', e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  onChange={(e) => handleChange('longBreakDuration', e.target.value)}
+                  className="w-full px-3 py-2 text-sm font-semibold rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 outline-none focus:border-brand-500"
                 />
               </div>
-            </div>
-            <div className="mt-3">
-              <label className="block mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-                Chu kỳ kích hoạt Nghỉ dài (Sau bao nhiêu phiên Focus)
-              </label>
-              <input
-                type="number"
-                min="1"
-                max="10"
-                value={formData.longBreakInterval}
-                onChange={e => handleChange('longBreakInterval', e.target.value)}
-                className="w-32 px-3 py-2 text-sm rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
             </div>
           </div>
 
-          {/* Section: Daily Goals */}
-          <div>
-            <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-              <Target className="w-4 h-4" />
-              <span>Mục Tiêu Hàng Ngày</span>
-            </div>
+          {/* Daily Goals */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+              <Target className="w-3.5 h-3.5" />
+              <span>Mục Tiêu Mỗi Ngày</span>
+            </h3>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-                  Mục tiêu Pomodoro / ngày
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1">
+                  Số phiên hoàn thành
                 </label>
                 <input
                   type="number"
                   min="1"
                   max="30"
                   value={formData.dailyGoalPomos}
-                  onChange={e => handleChange('dailyGoalPomos', e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  onChange={(e) => handleChange('dailyGoalPomos', e.target.value)}
+                  className="w-full px-3 py-2 text-sm font-semibold rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 outline-none focus:border-brand-500"
                 />
               </div>
+
               <div>
-                <label className="block mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-                  Mục tiêu Tập trung (Giờ / ngày)
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1">
+                  Thời lượng mục tiêu (giờ)
                 </label>
                 <input
                   type="number"
                   min="1"
-                  max="24"
+                  max="16"
                   value={formData.dailyGoalHours}
-                  onChange={e => handleChange('dailyGoalHours', e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  onChange={(e) => handleChange('dailyGoalHours', e.target.value)}
+                  className="w-full px-3 py-2 text-sm font-semibold rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 outline-none focus:border-brand-500"
                 />
               </div>
             </div>
           </div>
 
-          {/* Section: Sound & Behavior */}
-          <div>
-            <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-purple-600 dark:text-purple-400">
-              <Volume2 className="w-4 h-4" />
-              <span>Âm Thanh & Tự Động Hóa</span>
-            </div>
-            <div className="space-y-3 bg-slate-50 dark:bg-slate-900/50 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800">
-              {/* Sound Toggle */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium">Bật âm thanh chuông báo</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Phát chuông dịu êm khi kết thúc phiên</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleChange('soundEnabled', !formData.soundEnabled)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    formData.soundEnabled ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-700'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      formData.soundEnabled ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
+          {/* Sound & Audio Settings */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+              <Volume2 className="w-3.5 h-3.5" />
+              <span>Âm Thanh & Chuông Báo</span>
+            </h3>
 
-              {/* Volume Slider & Test */}
-              {formData.soundEnabled && (
-                <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center gap-3">
-                  <span className="text-xs text-slate-500">Âm lượng:</span>
-                  <input
-                    type="range"
-                    min="0.1"
-                    max="1"
-                    step="0.05"
-                    value={formData.soundVolume}
-                    onChange={e => handleChange('soundVolume', e.target.value)}
-                    className="flex-1 accent-brand-500 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg cursor-pointer"
-                  />
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <span>Âm lượng chuông</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-brand-600 dark:text-brand-400">
+                    {Math.round(formData.soundVolume * 100)}%
+                  </span>
                   <button
                     type="button"
                     onClick={handleTestSound}
-                    className="px-2.5 py-1 text-xs font-medium flex items-center gap-1 bg-brand-500/10 hover:bg-brand-500/20 text-brand-600 dark:text-brand-400 rounded-lg transition"
+                    className="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-lg bg-brand-500/10 text-brand-600 dark:text-brand-400 hover:bg-brand-500/20 font-bold transition cursor-pointer"
                   >
-                    <Play className="w-3 h-3" /> Thử chuông
+                    <Play className="w-3 h-3" />
+                    <span>Thử</span>
                   </button>
                 </div>
-              )}
-
-              {/* Auto Start Breaks Toggle */}
-              <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800">
-                <div>
-                  <p className="text-sm font-medium">Tự động chuyển sang giờ nghỉ</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Tự bật Break ngay khi hết phiên Focus</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleChange('autoStartBreaks', !formData.autoStartBreaks)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    formData.autoStartBreaks ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-700'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      formData.autoStartBreaks ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
               </div>
+
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={formData.soundVolume}
+                onChange={(e) => handleChange('soundVolume', Number(e.target.value))}
+                className="w-full accent-brand-600 dark:accent-brand-500 cursor-pointer"
+              />
             </div>
           </div>
 
-          {/* Section: Data Backup & Reset */}
-          <div>
-            <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-slate-600 dark:text-slate-300">
-              <Download className="w-4 h-4" />
-              <span>Quản Lý Dữ Liệu & Sao Lưu</span>
-            </div>
-            <div className="flex flex-wrap gap-2.5">
+          {/* Data Backup & Restore */}
+          <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Sao Lưu & Phục Hồi Dữ Liệu
+            </h3>
+            
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 onClick={exportData}
-                className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl transition"
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition cursor-pointer"
               >
-                <Download className="w-3.5 h-3.5" /> Xuất dữ liệu (JSON)
+                <Download className="w-3.5 h-3.5" />
+                <span>Xuất File JSON</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl transition"
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition cursor-pointer"
               >
-                <Upload className="w-3.5 h-3.5" /> Nhập dữ liệu (JSON)
+                <Upload className="w-3.5 h-3.5" />
+                <span>Nhập File JSON</span>
               </button>
               <input
                 ref={fileInputRef}
@@ -402,31 +325,39 @@ export const SettingsModal = ({ isOpen, onClose }) => {
 
               <button
                 type="button"
-                onClick={handleReset}
-                className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-xl transition ml-auto"
+                onClick={() => {
+                  if (confirm('Bạn có chắc chắn muốn đặt lại toàn bộ cài đặt về mặc định?')) {
+                    resetToDefaults();
+                    setFormData({ ...settings });
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 transition cursor-pointer ml-auto"
               >
-                <RotateCcw className="w-3.5 h-3.5" /> Đặt lại mặc định
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Đặt lại</span>
               </button>
             </div>
           </div>
 
           {/* Action Footer */}
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
+          <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-100 dark:border-slate-800">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition"
+              className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
             >
               Hủy
             </button>
             <button
               type="submit"
-              className="flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-brand-600 hover:bg-brand-500 rounded-xl shadow-lg shadow-brand-500/25 transition"
+              className="flex items-center gap-1.5 px-5 py-2 text-xs font-bold rounded-xl bg-brand-600 hover:bg-brand-500 text-white shadow-md shadow-brand-500/25 transition cursor-pointer"
             >
-              <Save className="w-4 h-4" /> Lưu Cài Đặt
+              <Save className="w-3.5 h-3.5" />
+              <span>Lưu Cài Đặt</span>
             </button>
           </div>
         </form>
+
       </div>
     </div>
   );
