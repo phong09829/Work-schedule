@@ -158,10 +158,10 @@ app.post('/api/auth/send-otp', async (req, res) => {
 
     const cleanEmail = normalizeEmail(email);
 
-    // Kiểm tra cooldown gửi lại mã (chặn spam trong 30 giây)
+    // Kiểm tra cooldown gửi lại mã (3 giây để chống spam nhẹ mà không làm kẹt người dùng)
     const existing = otpStore.get(cleanEmail);
-    if (existing && Date.now() - existing.createdAt < 30 * 1000) {
-      const waitSeconds = Math.ceil((30 * 1000 - (Date.now() - existing.createdAt)) / 1000);
+    if (existing && Date.now() - existing.createdAt < 3 * 1000) {
+      const waitSeconds = Math.ceil((3 * 1000 - (Date.now() - existing.createdAt)) / 1000);
       return res.status(429).json({
         ok: false,
         message: `Vui lòng đợi ${waitSeconds} giây trước khi yêu cầu gửi lại mã mới!`

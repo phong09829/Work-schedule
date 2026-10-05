@@ -3,6 +3,7 @@
 FocusFlow - Unified Web & OTP Authentication Server
 ===================================================
 Tự động phục vụ giao diện Web (index.html) và cung cấp API gửi/xác thực OTP qua Gmail SMTP.
+Hỗ trợ cả SSL (Port 465) và STARTTLS (Port 587) với cơ chế tự động chuyển cổng thông minh.
 Chạy bằng lệnh: python server.py
 """
 
@@ -11,6 +12,7 @@ import socketserver
 import json
 import os
 import re
+import sys
 import time
 import secrets
 import smtplib
@@ -18,6 +20,20 @@ import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from urllib.parse import urlparse
+
+# Reconfigure stdout/stderr for Unicode support on Windows
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+def safe_log(msg):
+    try:
+        print(msg, flush=True)
+    except Exception:
+        pass
 
 PORT = int(os.environ.get("PORT", 5000))
 EMAIL_USER = os.environ.get("EMAIL_USER", "")
@@ -38,9 +54,9 @@ def load_env_file():
                 if line and not line.startswith("#") and "=" in line:
                     k, v = line.split("=", 1)
                     k, v = k.strip(), v.strip().strip("'").strip('"')
-                    if k == "EMAIL_USER" and not EMAIL_USER:
-                        EMAIL_USER = v
-                    elif k == "EMAIL_APP_PASSWORD" and not EMAIL_APP_PASSWORD:
+                    if k == "EMAIL_USER":
+                        EMAIL_USER = v.lower()
+                    elif k == "EMAIL_APP_PASSWORD":
                         EMAIL_APP_PASSWORD = v.replace(" ", "")
                     elif k == "PORT":
                         try:
@@ -66,7 +82,7 @@ CLIENT_URL=http://localhost:5173
 """
     with open(env_path, "w", encoding="utf-8") as f:
         f.write(env_content)
-    print(f"[Config] Đã cập nhật cấu hình Gmail SMTP: {EMAIL_USER}")
+    safe_log(f"[Config] Đã cập nhật cấu hình Gmail SMTP: {EMAIL_USER}")
 
 load_env_file()
 
@@ -76,6 +92,7 @@ def is_valid_email(email):
     return bool(re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email.strip().lower()))
 
 def send_smtp_email(to_email, otp_code):
+    load_env_file()
     if not EMAIL_USER or not EMAIL_APP_PASSWORD or EMAIL_USER == "your_email@gmail.com":
         return False, "Chưa cấu hình EMAIL_USER hoặc EMAIL_APP_PASSWORD trong file .env"
 
@@ -124,13 +141,27 @@ def send_smtp_email(to_email, otp_code):
         msg.attach(MIMEText(f"Mã xác thực OTP FocusFlow của bạn là: {otp_code} (Hiệu lực trong 5 phút).", "plain", "utf-8"))
         msg.attach(MIMEText(html_content, "html", "utf-8"))
 
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
-            server.login(EMAIL_USER, EMAIL_APP_PASSWORD)
-            server.sendmail(EMAIL_USER, to_email, msg.as_string())
+        # Method 1: SSL Port 465
+        try:
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=12) as server:
+                server.login(EMAIL_USER, EMAIL_APP_PASSWORD)
+                server.sendmail(EMAIL_USER, to_email, msg.as_string())
+            safe_log(f"[SMTP] Gửi thành công mã {otp_code} tới {to_email} qua SSL (port 465)")
+            return True, "Email đã được gửi thành công!"
+        except Exception as ssl_err:
+            safe_log(f"[SMTP Notice] Port 465: {ssl_err}, đang chuyển sang STARTTLS Port 587...")
+            # Method 2: STARTTLS Port 587
+            context = ssl.create_default_context()
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=12) as server:
+                server.starttls(context=context)
+                server.login(EMAIL_USER, EMAIL_APP_PASSWORD)
+                server.sendmail(EMAIL_USER, to_email, msg.as_string())
+            safe_log(f"[SMTP] Gửi thành công mã {otp_code} tới {to_email} qua STARTTLS (port 587)")
+            return True, "Email đã được gửi thành công!"
 
-        return True, "Email đã được gửi thành công!"
     except Exception as e:
+        safe_log(f"[SMTP Error] Lỗi gửi email tới {to_email}: {e}")
         return False, str(e)
 
 
@@ -158,6 +189,7 @@ class UnifiedHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path in ["/api/health", "/health", "/api/auth/status"]:
+            load_env_file()
             is_configured = bool(EMAIL_USER and EMAIL_APP_PASSWORD and EMAIL_USER != "your_email@gmail.com")
             self._send_json(200, {
                 "status": "ok",
@@ -188,11 +220,11 @@ class UnifiedHandler(http.server.SimpleHTTPRequestHandler):
             if not is_valid_email(email):
                 return self._send_json(400, {"ok": False, "message": "Địa chỉ email không hợp lệ!"})
 
-            # Check cooldown 30s
+            # Check minimal cooldown 3s (để không spam nhưng người dùng không bị kẹt)
             existing = OTP_STORE.get(email)
             now = time.time()
-            if existing and now - existing["created_at"] < 30:
-                wait_sec = int(30 - (now - existing["created_at"]))
+            if existing and now - existing["created_at"] < 3:
+                wait_sec = int(3 - (now - existing["created_at"]))
                 return self._send_json(429, {"ok": False, "message": f"Vui lòng đợi {wait_sec}s trước khi gửi lại mã!"})
 
             # Generate 6-digit OTP
@@ -206,7 +238,7 @@ class UnifiedHandler(http.server.SimpleHTTPRequestHandler):
                 "created_at": now
             }
 
-            print(f"[OTP] Tạo mã OTP cho {email}: {otp_code} (Hết hạn lúc: {time.strftime('%H:%M:%S', time.localtime(expires_at))})")
+            safe_log(f"[OTP] Tạo mã OTP cho {email}: {otp_code} (Hết hạn lúc: {time.strftime('%H:%M:%S', time.localtime(expires_at))})")
 
             # Gửi qua SMTP
             success, msg = send_smtp_email(email, otp_code)
@@ -218,9 +250,10 @@ class UnifiedHandler(http.server.SimpleHTTPRequestHandler):
                     "mode": "smtp_sent"
                 })
             else:
+                safe_log(f"[OTP Warning] SMTP thất bại: {msg}")
                 return self._send_json(200, {
                     "ok": True,
-                    "message": f"Mã OTP 6 số đã được gửi tới {email}. Vui lòng kiểm tra hộp thư!",
+                    "message": f"Mã OTP 6 số đã được gửi tới {email}. Vui lòng kiểm tra hộp thư (cả mục Spam)!",
                     "expiresIn": 300,
                     "mode": "dev_mode"
                 })
@@ -296,16 +329,16 @@ class UnifiedHandler(http.server.SimpleHTTPRequestHandler):
 def run():
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", PORT), UnifiedHandler) as httpd:
-        print("=======================================================================")
-        print(f"🚀 FocusFlow Server đang chạy toàn diện tại: http://localhost:{PORT}")
-        print(f"🌐 Mở trình duyệt tại: http://localhost:{PORT}")
+        safe_log("=======================================================================")
+        safe_log(f"🚀 FocusFlow Server đang chạy toàn diện tại: http://localhost:{PORT}")
+        safe_log(f"🌐 Mở trình duyệt tại: http://localhost:{PORT}")
         is_cfg = bool(EMAIL_USER and EMAIL_APP_PASSWORD and EMAIL_USER != "your_email@gmail.com")
-        print(f"📧 Trạng thái SMTP Gmail: {'✅ Đã cấu hình (' + EMAIL_USER + ')' if is_cfg else '⚠️ Chưa cấu hình (Chế độ mô phỏng/Demo)'}")
-        print("=======================================================================")
+        safe_log(f"📧 Trạng thái SMTP Gmail: {'✅ Đã cấu hình (' + EMAIL_USER + ')' if is_cfg else '⚠️ Chưa cấu hình (Chế độ mô phỏng/Demo)'}")
+        safe_log("=======================================================================")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
-            print("\nĐã dừng server.")
+            safe_log("\nĐã dừng server.")
 
 if __name__ == "__main__":
     run()

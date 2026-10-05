@@ -31,7 +31,7 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
   // Step: 'EMAIL' (Bước 1: Nhập email) | 'OTP' (Bước 2: Nhập 6 số OTP)
   const [step, setStep] = useState('EMAIL');
   const [email, setEmail] = useState('');
-  const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
+  const [otp, setOtp] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
   const [serverInfo, setServerInfo] = useState(null);
@@ -47,7 +47,7 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
   // Cooldown before user can click 'Resend OTP' (60s)
   const [resendCooldown, setResendCooldown] = useState(0);
 
-  const otpInputRefs = useRef([]);
+  const masterInputRef = useRef(null);
 
   // Reset modal state when opened
   useEffect(() => {
@@ -57,7 +57,7 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
 
       if (!isAccountLoggedIn) {
         setStep('EMAIL');
-        setOtpDigits(['', '', '', '', '', '']);
+        setOtp('');
       }
     }
   }, [isOpen, isAccountLoggedIn]);
@@ -84,13 +84,12 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
     return () => clearInterval(timer);
   }, [resendCooldown]);
 
-  // Auto focus first OTP input when moving to OTP step
+  // Auto focus OTP master input when moving to OTP step
   useEffect(() => {
     if (step === 'OTP') {
       setTimeout(() => {
-        otpInputRefs.current[0]?.focus();
-        otpInputRefs.current[0]?.select();
-      }, 150);
+        masterInputRef.current?.focus();
+      }, 100);
     }
   }, [step]);
 
@@ -163,7 +162,7 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
         setStep('OTP');
         setCountdown(300); // 5 phút
         setResendCooldown(60); // 60s cooldown
-        setOtpDigits(['', '', '', '', '', '']);
+        setOtp('');
 
         showToast(res.message || 'Mã OTP đã được gửi đến email của bạn!', 'success', 5000);
       } else {
@@ -185,101 +184,21 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
   };
 
   // -------------------------------------------------------------
-  // HANDLER: XỬ LÝ NHẬP 6 Ô OTP (CHUẨN XÁC, KHÔNG BỊ NHẢY SỐ)
+  // HANDLER: XỬ LÝ NHẬP MÃ OTP (CHUẨN XÁC 100%, KHÔNG BAO GIỜ BỊ NHẢY HOẶC 2 SỐ)
   // -------------------------------------------------------------
-  const handleOtpChange = (index, e) => {
-    const rawVal = e.target.value;
-    const digitsOnly = rawVal.replace(/\D/g, '');
+  const handleOtpInputChange = (e) => {
+    const rawDigits = e.target.value.replace(/\D/g, '').slice(0, 6);
+    setOtp(rawDigits);
+    setErrorMessage(null);
 
-    if (!digitsOnly) {
-      const newDigits = [...otpDigits];
-      newDigits[index] = '';
-      setOtpDigits(newDigits);
-      return;
-    }
-
-    // Nếu người dùng gõ/dán nhiều ký tự vào ô này
-    if (digitsOnly.length > 1) {
-      const newDigits = [...otpDigits];
-      const chars = digitsOnly.slice(0, 6).split('');
-      chars.forEach((c, i) => {
-        if (index + i < 6) {
-          newDigits[index + i] = c;
-        }
-      });
-      setOtpDigits(newDigits);
-      const nextFocus = Math.min(index + chars.length, 5);
-      otpInputRefs.current[nextFocus]?.focus();
-      otpInputRefs.current[nextFocus]?.select();
-
-      const fullCode = newDigits.join('');
-      if (fullCode.length === 6 && !newDigits.includes('')) {
-        handleVerifyOtp(fullCode);
-      }
-      return;
-    }
-
-    // Trường hợp nhập đúng 1 ký tự số
-    const newDigits = [...otpDigits];
-    newDigits[index] = digitsOnly;
-    setOtpDigits(newDigits);
-
-    // Tự động nhảy sang ô tiếp theo và chọn sẵn
-    if (index < 5) {
-      otpInputRefs.current[index + 1]?.focus();
-      otpInputRefs.current[index + 1]?.select();
-    }
-
-    // Tự động xác thực khi nhập đủ 6 số
-    const fullCode = newDigits.join('');
-    if (fullCode.length === 6 && !newDigits.includes('')) {
-      handleVerifyOtp(fullCode);
+    if (rawDigits.length === 6) {
+      handleVerifyOtp(rawDigits);
     }
   };
 
-  const handleOtpKeyDown = (index, e) => {
-    if (e.key === 'Backspace') {
-      if (otpDigits[index]) {
-        // Xóa ô hiện tại
-        const newDigits = [...otpDigits];
-        newDigits[index] = '';
-        setOtpDigits(newDigits);
-      } else if (index > 0) {
-        // Ô hiện tại rỗng, lùi về ô trước và xóa
-        const newDigits = [...otpDigits];
-        newDigits[index - 1] = '';
-        setOtpDigits(newDigits);
-        otpInputRefs.current[index - 1]?.focus();
-        otpInputRefs.current[index - 1]?.select();
-      }
-    } else if (e.key === 'ArrowLeft' && index > 0) {
-      e.preventDefault();
-      otpInputRefs.current[index - 1]?.focus();
-      otpInputRefs.current[index - 1]?.select();
-    } else if (e.key === 'ArrowRight' && index < 5) {
-      e.preventDefault();
-      otpInputRefs.current[index + 1]?.focus();
-      otpInputRefs.current[index + 1]?.select();
-    }
-  };
-
-  const handleOtpPaste = (e) => {
-    e.preventDefault();
-    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
-    if (!pasted) return;
-
-    const newDigits = ['', '', '', '', '', ''];
-    pasted.split('').forEach((c, i) => {
-      if (i < 6) newDigits[i] = c;
-    });
-    setOtpDigits(newDigits);
-
-    const nextFocus = Math.min(pasted.length, 5);
-    otpInputRefs.current[nextFocus]?.focus();
-    otpInputRefs.current[nextFocus]?.select();
-
-    if (pasted.length === 6) {
-      handleVerifyOtp(pasted);
+  const handleOtpKeyDown = (e) => {
+    if (e.key === 'Enter' && otp.length === 6) {
+      handleVerifyOtp(otp);
     }
   };
 
@@ -287,7 +206,7 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
   // HANDLER: XÁC THỰC MÃ OTP (BƯỚC 2)
   // -------------------------------------------------------------
   const handleVerifyOtp = async (codeToVerify) => {
-    const finalOtp = typeof codeToVerify === 'string' ? codeToVerify : otpDigits.join('');
+    const finalOtp = typeof codeToVerify === 'string' ? codeToVerify : otp;
 
     if (finalOtp.length !== 6) {
       setErrorMessage('Vui lòng nhập đầy đủ 6 chữ số của mã OTP!');
@@ -551,12 +470,12 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
             )}
 
             {/* ------------------------------------------------------------- */}
-            {/* BƯỚC 2: NHẬP MÃ OTP 6 CHỮ SỐ (KHÔNG BỊ NHẢY SỐ) */}
+            {/* BƯỚC 2: NHẬP MÃ OTP 6 CHỮ SỐ (UNIFIED INPUT - KHÔNG BAO GIỜ NHẢY HOẶC 2 SỐ) */}
             {/* ------------------------------------------------------------- */}
             {step === 'OTP' && (
               <div className="space-y-5 animate-fade-in">
                 
-                {/* 6 Individual Digit Boxes */}
+                {/* 6 Visual Digit Cells with Master Input Overlay */}
                 <div className="space-y-2">
                   <div className="flex justify-between items-center text-xs">
                     <span className="font-bold text-slate-700 dark:text-slate-300">
@@ -570,32 +489,59 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
                     </div>
                   </div>
 
-                  <div className="flex justify-between gap-1.5 sm:gap-2" onPaste={handleOtpPaste}>
-                    {otpDigits.map((digit, idx) => (
-                      <input
-                        key={idx}
-                        ref={(el) => (otpInputRefs.current[idx] = el)}
-                        type="text"
-                        inputMode="numeric"
-                        autoComplete="one-time-code"
-                        value={digit}
-                        onFocus={(e) => e.target.select()}
-                        onChange={(e) => handleOtpChange(idx, e)}
-                        onKeyDown={(e) => handleOtpKeyDown(idx, e)}
-                        className={`w-12 h-13 sm:w-13 sm:h-14 text-center text-xl sm:text-2xl font-black font-mono rounded-2xl border transition-all duration-150 outline-none cursor-pointer ${
-                          digit
-                            ? 'bg-brand-500/10 border-brand-500 text-brand-600 dark:text-brand-400 shadow-sm shadow-brand-500/10'
-                            : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30'
-                        }`}
-                      />
-                    ))}
+                  <div 
+                    className="relative flex justify-between gap-1.5 sm:gap-2.5 py-1 cursor-text select-none"
+                    onClick={() => masterInputRef.current?.focus()}
+                  >
+                    {/* Master input capturing all keystrokes, paste, backspace, mobile autofill */}
+                    <input
+                      ref={masterInputRef}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      value={otp}
+                      onChange={handleOtpInputChange}
+                      onKeyDown={handleOtpKeyDown}
+                      className="absolute inset-0 w-full h-full opacity-0 z-20 cursor-pointer caret-transparent"
+                      autoFocus
+                    />
+
+                    {/* 6 Visual Digit Cells */}
+                    {[0, 1, 2, 3, 4, 5].map((index) => {
+                      const digit = otp[index] || '';
+                      const isCurrentActive = otp.length === index;
+                      const isFilled = Boolean(digit);
+
+                      return (
+                        <div
+                          key={index}
+                          className={`flex-1 h-13 sm:h-14 flex items-center justify-center text-xl sm:text-2xl font-black font-mono rounded-2xl border-2 transition-all duration-150 relative ${
+                            isFilled
+                              ? 'bg-brand-500/10 border-brand-500 text-brand-600 dark:text-brand-400 shadow-sm shadow-brand-500/15 scale-[1.02]'
+                              : isCurrentActive
+                              ? 'border-brand-500 ring-4 ring-brand-500/20 bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
+                              : 'border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-800/60 text-slate-400'
+                          }`}
+                        >
+                          {isFilled ? (
+                            <span>{digit}</span>
+                          ) : isCurrentActive ? (
+                            <span className="w-0.5 h-6 bg-brand-500 animate-pulse rounded-full" />
+                          ) : (
+                            <span className="text-slate-300 dark:text-slate-600 text-base font-normal">•</span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
                 {/* Confirm Button */}
                 <button
                   onClick={() => handleVerifyOtp()}
-                  disabled={isLoading || otpDigits.join('').length !== 6 || countdown <= 0}
+                  disabled={isLoading || otp.length !== 6 || countdown <= 0}
                   className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-brand-600 via-indigo-600 to-purple-600 hover:from-brand-500 hover:to-purple-500 text-white font-extrabold text-sm shadow-lg shadow-brand-500/25 flex items-center justify-center gap-2 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {isLoading ? (
@@ -648,3 +594,4 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
     </div>
   );
 };
+
