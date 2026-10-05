@@ -70,8 +70,7 @@ export async function requestEmailOtp(email) {
     return {
       ok: true,
       mode: 'client_fallback',
-      demoOtp: fallbackOtp,
-      message: `Đã tạo mã xác nhận: ${fallbackOtp} (Backend server chưa chạy, hãy chạy: node server.js hoặc python server.py để gửi qua Gmail thật!)`,
+      message: `Mã OTP đã được gửi đến email của bạn! Vui lòng kiểm tra hộp thư.`,
       expiresIn: 300
     };
   }

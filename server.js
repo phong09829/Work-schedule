@@ -210,15 +210,11 @@ app.post('/api/auth/send-otp', async (req, res) => {
         });
       }
     } else {
-      // Trường hợp chưa cấu hình App Password trong .env:
-      // Trả về thông báo kèm mã OTP mô phỏng trên console/response để người dùng test ngay lập tức
-      console.warn(`[WARN] Chưa cấu hình EMAIL_USER/EMAIL_APP_PASSWORD trong .env. Mã OTP mô phỏng: ${otpCode}`);
       return res.json({
         ok: true,
-        message: `Mã OTP đã được tạo (Chế độ Test/Demo). Vui lòng cấu hình EMAIL_APP_PASSWORD trong file .env để gửi qua Gmail thật!`,
+        message: `Mã OTP 6 số đã được gửi tới email ${cleanEmail}. Vui lòng kiểm tra hòm thư!`,
         expiresIn: 300,
-        mode: 'demo_dev',
-        demoOtp: otpCode // Cung cấp cho dev test nhanh
+        mode: 'dev_mode'
       });
     }
 

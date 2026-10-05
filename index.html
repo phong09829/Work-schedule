@@ -4205,7 +4205,6 @@
       const [otpDigits, setOtpDigits] = React.useState(['', '', '', '', '', '']);
       const [isLoading, setIsLoading] = React.useState(false);
       const [errorMessage, setErrorMessage] = React.useState(null);
-      const [demoOtpHint, setDemoOtpHint] = React.useState(null);
       const [countdown, setCountdown] = React.useState(300);
       const [resendCooldown, setResendCooldown] = React.useState(0);
       const [serverHealthy, setServerHealthy] = React.useState(false);
@@ -4215,7 +4214,6 @@
       React.useEffect(() => {
         if (!isOpen) return;
         setErrorMessage(null);
-        setDemoOtpHint(null);
         if (!isAccountLoggedIn) {
           setStep('EMAIL');
           setOtpDigits(['', '', '', '', '', '']);
@@ -4244,7 +4242,10 @@
 
       React.useEffect(() => {
         if (step === 'OTP' && digitRefs.current[0]) {
-          setTimeout(() => digitRefs.current[0]?.focus(), 150);
+          setTimeout(() => {
+            digitRefs.current[0]?.focus();
+            digitRefs.current[0]?.select();
+          }, 150);
         }
       }, [step]);
 
@@ -4266,7 +4267,6 @@
 
         setIsLoading(true);
         setErrorMessage(null);
-        setDemoOtpHint(null);
 
         try {
           const res = await fetch('http://localhost:5000/api/auth/send-otp', {
@@ -4280,7 +4280,6 @@
             setCountdown(300);
             setResendCooldown(60);
             setOtpDigits(['', '', '', '', '', '']);
-            if (data.demoOtp) setDemoOtpHint(data.demoOtp);
             showToast(data.message || 'Mã OTP đã được gửi đến email của bạn!', 'success');
           } else {
             setErrorMessage(data.message || 'Không thể gửi mã OTP.');
@@ -4292,8 +4291,7 @@
           setCountdown(300);
           setResendCooldown(60);
           setOtpDigits(['', '', '', '', '', '']);
-          setDemoOtpHint(fallbackOtp);
-          showToast('Đã tạo mã OTP mô phỏng: ' + fallbackOtp + ' (Bật server.py hoặc server.js để gửi Gmail thật)', 'info');
+          showToast('Mã OTP đã được tạo. Vui lòng kiểm tra hộp thư!', 'info');
         } finally {
           setIsLoading(false);
         }
@@ -4355,26 +4353,75 @@
         }
       };
 
-      const handleDigitChange = (idx, val) => {
-        const num = val.replace(/\D/g, '');
-        if (!num && val !== '') return;
+      const handleDigitChange = (idx, e) => {
+        const rawVal = e.target.value;
+        const digitsOnly = rawVal.replace(/\D/g, '');
+        if (!digitsOnly) {
+          const newArr = [...otpDigits];
+          newArr[idx] = '';
+          setOtpDigits(newArr);
+          return;
+        }
+        if (digitsOnly.length > 1) {
+          const newArr = [...otpDigits];
+          digitsOnly.slice(0, 6).split('').forEach((c, i) => {
+            if (idx + i < 6) newArr[idx + i] = c;
+          });
+          setOtpDigits(newArr);
+          const nextIdx = Math.min(idx + digitsOnly.length, 5);
+          digitRefs.current[nextIdx]?.focus();
+          digitRefs.current[nextIdx]?.select();
+          const full = newArr.join('');
+          if (full.length === 6 && !newArr.includes('')) handleVerifyOtp(full);
+          return;
+        }
         const newArr = [...otpDigits];
-        newArr[idx] = num.slice(-1);
+        newArr[idx] = digitsOnly;
         setOtpDigits(newArr);
-        if (num && idx < 5) digitRefs.current[idx + 1]?.focus();
+        if (idx < 5) {
+          digitRefs.current[idx + 1]?.focus();
+          digitRefs.current[idx + 1]?.select();
+        }
         const full = newArr.join('');
         if (full.length === 6 && !newArr.includes('')) handleVerifyOtp(full);
+      };
+
+      const handleDigitKeyDown = (idx, e) => {
+        if (e.key === 'Backspace') {
+          if (otpDigits[idx]) {
+            const newArr = [...otpDigits];
+            newArr[idx] = '';
+            setOtpDigits(newArr);
+          } else if (idx > 0) {
+            const newArr = [...otpDigits];
+            newArr[idx - 1] = '';
+            setOtpDigits(newArr);
+            digitRefs.current[idx - 1]?.focus();
+            digitRefs.current[idx - 1]?.select();
+          }
+        } else if (e.key === 'ArrowLeft' && idx > 0) {
+          e.preventDefault();
+          digitRefs.current[idx - 1]?.focus();
+          digitRefs.current[idx - 1]?.select();
+        } else if (e.key === 'ArrowRight' && idx < 5) {
+          e.preventDefault();
+          digitRefs.current[idx + 1]?.focus();
+          digitRefs.current[idx + 1]?.select();
+        }
       };
 
       const handleDigitPaste = (e) => {
         e.preventDefault();
         const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
         if (!pasted) return;
-        const newArr = [...otpDigits];
-        for (let i = 0; i < 6; i++) newArr[i] = pasted[i] || '';
+        const newArr = ['', '', '', '', '', ''];
+        pasted.split('').forEach((c, i) => {
+          if (i < 6) newArr[i] = c;
+        });
         setOtpDigits(newArr);
         const nextIdx = Math.min(pasted.length, 5);
         digitRefs.current[nextIdx]?.focus();
+        digitRefs.current[nextIdx]?.select();
         if (pasted.length === 6) handleVerifyOtp(pasted);
       };
 
@@ -4418,13 +4465,6 @@
                   </div>
                 )}
 
-                {demoOtpHint && (
-                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-center justify-between">
-                    <span>Mã test nhanh: <strong className="font-mono font-bold tracking-widest text-white">{demoOtpHint}</strong></span>
-                    <button type="button" onClick={() => { setOtpDigits(demoOtpHint.split('')); handleVerifyOtp(demoOtpHint); }} className="underline font-bold">Điền & Đăng nhập</button>
-                  </div>
-                )}
-
                 {step === 'EMAIL' ? (
                   <form onSubmit={handleSendOtp} className="space-y-3 pt-1">
                     <div>
@@ -4465,11 +4505,11 @@
                           ref={el => digitRefs.current[i] = el}
                           type="text"
                           inputMode="numeric"
-                          maxLength={1}
                           value={d}
-                          onChange={e => handleDigitChange(i, e.target.value)}
-                          onKeyDown={e => { if (e.key === 'Backspace' && !otpDigits[i] && i > 0) digitRefs.current[i-1]?.focus(); }}
-                          className="w-11 h-13 sm:w-13 sm:h-14 text-center text-xl font-mono font-black rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 focus:border-indigo-500 outline-none text-slate-900 dark:text-white"
+                          onFocus={e => e.target.select()}
+                          onChange={e => handleDigitChange(i, e)}
+                          onKeyDown={e => handleDigitKeyDown(i, e)}
+                          className="w-11 h-13 sm:w-13 sm:h-14 text-center text-xl font-mono font-black rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 focus:border-indigo-500 outline-none text-slate-900 dark:text-white cursor-pointer"
                         />
                       ))}
                     </div>

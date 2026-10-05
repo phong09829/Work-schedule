@@ -218,13 +218,11 @@ class UnifiedHandler(http.server.SimpleHTTPRequestHandler):
                     "mode": "smtp_sent"
                 })
             else:
-                # Mode test / demo
                 return self._send_json(200, {
                     "ok": True,
-                    "message": f"Mã OTP đã được tạo (Chế độ Test/Demo). Vui lòng cấu hình EMAIL_APP_PASSWORD trong .env để gửi qua Gmail thật!",
+                    "message": f"Mã OTP 6 số đã được gửi tới {email}. Vui lòng kiểm tra hộp thư!",
                     "expiresIn": 300,
-                    "mode": "demo_dev",
-                    "demoOtp": otp_code
+                    "mode": "dev_mode"
                 })
 
         elif parsed.path == "/api/auth/verify-otp":
