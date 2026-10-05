@@ -1,12 +1,25 @@
 import React from 'react';
 
-export const StatCard = ({ title, value, subtitle, icon: Icon, color = 'brand', trend }) => {
+export const StatCard = ({ 
+  title, 
+  label, 
+  value, 
+  subtitle, 
+  badge, 
+  icon: Icon, 
+  color = 'brand', 
+  iconBg, 
+  trend 
+}) => {
+  const displayTitle = title || label;
+  const displaySub = subtitle || badge;
+
   const colorMap = {
     brand: {
-      bg: 'bg-brand-500/10 dark:bg-brand-500/15',
-      text: 'text-brand-600 dark:text-brand-400',
-      border: 'border-brand-500/20',
-      gradient: 'from-brand-500/10 to-transparent',
+      bg: 'bg-indigo-500/10 dark:bg-indigo-500/15',
+      text: 'text-indigo-600 dark:text-indigo-400',
+      border: 'border-indigo-500/20',
+      gradient: 'from-indigo-500/10 to-transparent',
     },
     emerald: {
       bg: 'bg-emerald-500/10 dark:bg-emerald-500/15',
@@ -31,33 +44,33 @@ export const StatCard = ({ title, value, subtitle, icon: Icon, color = 'brand', 
   const c = colorMap[color] || colorMap.brand;
 
   return (
-    <div className={`relative overflow-hidden glass-card rounded-2xl p-5 border ${c.border} hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300`}>
-      <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl ${c.gradient} rounded-bl-full pointer-events-none`} />
+    <div className={`relative overflow-hidden glass-card rounded-3xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800/80 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group`}>
+      <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl ${c.gradient} rounded-bl-full pointer-events-none opacity-50 group-hover:opacity-100 transition-opacity`} />
       
-      <div className="flex items-start justify-between">
-        <div>
+      <div className="flex items-start justify-between relative z-10">
+        <div className="space-y-1">
           <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-            {title}
+            {displayTitle}
           </p>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold tracking-tight">
+          <div className="flex items-baseline gap-2 pt-1">
+            <span className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-slate-100 font-mono">
               {value}
             </span>
             {trend && (
-              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+              <span className="text-[10px] sm:text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                 {trend}
               </span>
             )}
           </div>
-          {subtitle && (
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 font-medium">
-              {subtitle}
+          {displaySub && (
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium pt-0.5">
+              {displaySub}
             </p>
           )}
         </div>
 
-        <div className={`p-3 rounded-2xl ${c.bg} ${c.text}`}>
-          <Icon className="w-6 h-6" />
+        <div className={`p-3 sm:p-3.5 rounded-2xl ${iconBg || c.bg} ${c.text} shadow-sm group-hover:scale-110 transition-transform`}>
+          {Icon && <Icon className="w-5 h-5 sm:w-6 sm:h-6" />}
         </div>
       </div>
     </div>
