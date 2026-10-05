@@ -21,7 +21,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { useTheme } from '../context/ThemeContext';
 import { SettingsModal } from './Settings/SettingsModal';
-import { GoogleConfigModal } from './Calendar/GoogleConfigModal';
+import { GoogleConfigModal, GoogleIcon } from './Calendar/GoogleConfigModal';
 
 export const Navbar = () => {
   const { 
@@ -98,34 +98,42 @@ export const Navbar = () => {
             {/* Right Quick Actions */}
             <div className="flex items-center gap-1.5 sm:gap-2.5">
 
-              {/* Account & Cloud Sync Status Button */}
+              {/* Account & Google Sign-In Status Button */}
               <button
                 onClick={() => setIsGoogleModalOpen(true)}
-                title={isAccountLoggedIn ? `Tài khoản: ${currentUser?.email}` : 'Đăng nhập tài khoản'}
-                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-sm ${
+                title={isAccountLoggedIn ? `Tài khoản Google: ${currentUser?.email}` : 'Đăng nhập bằng Google'}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs font-bold transition-all shadow-sm cursor-pointer ${
                   isAccountLoggedIn
-                    ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-500/20'
-                    : 'bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 text-white border-transparent hover:opacity-90 shadow-cyan-500/20'
+                    ? 'bg-blue-500/10 border-blue-500/30 text-blue-700 dark:text-blue-300 hover:bg-blue-500/20'
+                    : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border-slate-200 dark:border-slate-700 hover:shadow-md hover:border-blue-400'
                 }`}
               >
                 {isAccountLoggedIn ? (
                   <>
-                    <div className="w-4 h-4 rounded-full bg-cyan-500 text-white flex items-center justify-center text-[10px] font-bold">
-                      {currentUser?.name?.charAt(0) || currentUser?.email?.charAt(0) || 'U'}
-                    </div>
+                    {currentUser?.avatar ? (
+                      <img 
+                        src={currentUser.avatar} 
+                        alt="Avatar" 
+                        className="w-5 h-5 rounded-full object-cover border border-blue-400/50" 
+                      />
+                    ) : (
+                      <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-white flex items-center justify-center text-[10px] font-bold">
+                        {currentUser?.name?.charAt(0) || currentUser?.email?.charAt(0) || 'G'}
+                      </div>
+                    )}
                     <span className="hidden sm:inline max-w-[110px] truncate">
                       {currentUser?.name?.split(' ')[0] || currentUser?.email?.split('@')[0]}
                     </span>
                     {isCloudSyncing ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-500" />
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-500" />
                     ) : (
-                      <Cloud className="w-3.5 h-3.5 text-cyan-500" />
+                      <Cloud className="w-3.5 h-3.5 text-blue-500" />
                     )}
                   </>
                 ) : (
                   <>
-                    <LogIn className="w-3.5 h-3.5" />
-                    <span className="text-xs">Đăng Nhập</span>
+                    <GoogleIcon className="w-4 h-4" />
+                    <span className="text-xs font-semibold">Đăng Nhập Google</span>
                   </>
                 )}
               </button>

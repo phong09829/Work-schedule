@@ -1,4 +1,5 @@
 // Google Calendar API & OAuth 2.0 Integration Utility
+import { GOOGLE_CLIENT_ID } from '../config/authConfig';
 
 export const GOOGLE_STORAGE_KEYS = {
   CLIENT_ID: 'focusflow_google_client_id_v1',
@@ -155,15 +156,19 @@ export const loadGoogleIdentityServicesScript = () => {
 /**
  * Initiate Google OAuth popup flow
  */
-export const initiateGoogleOAuthLogin = async ({ clientId, onSuccess, onError }) => {
+export const initiateGoogleOAuthLogin = async ({ clientId = GOOGLE_CLIENT_ID, onSuccess, onError }) => {
   try {
     await loadGoogleIdentityServicesScript();
     if (!window.google?.accounts?.oauth2) {
       throw new Error('Google Identity Services chưa sẵn sàng.');
     }
 
+    const activeId = (clientId && clientId !== 'ĐIỀN_CLIENT_ID_CỦA_BẠN_VÀO_ĐÂY')
+      ? clientId
+      : (localStorage.getItem(GOOGLE_STORAGE_KEYS.CLIENT_ID) || GOOGLE_CLIENT_ID);
+
     const tokenClient = window.google.accounts.oauth2.initTokenClient({
-      client_id: clientId,
+      client_id: activeId,
       scope: GOOGLE_SCOPES,
       callback: (tokenResponse) => {
         if (tokenResponse.error) {

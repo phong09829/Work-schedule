@@ -1,45 +1,41 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   CheckCircle2, 
   AlertCircle, 
-  LogIn, 
   LogOut, 
   RefreshCw, 
   Mail, 
   User, 
-  Lock, 
-  Eye, 
-  EyeOff, 
-  UserPlus, 
-  Cloud, 
-  Download, 
-  RotateCcw, 
-  FileJson, 
-  Smartphone, 
+  Sparkles,
   Link as LinkIcon, 
   Copy, 
-  Anchor,
-  ArrowRight,
   ExternalLink,
   ShieldCheck,
-  Sparkles,
   Calendar,
   Check,
+  Smartphone,
+  Download,
+  FileJson,
+  KeyRound,
   ChevronDown,
   ChevronUp,
-  KeyRound
+  Sliders,
+  Settings,
+  Info
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { exportFullBackup } from '../../utils/cloudSync';
+import { GOOGLE_CLIENT_ID } from '../../config/authConfig';
 import { 
-  GOOGLE_SCOPES, 
-  GOOGLE_STORAGE_KEYS, 
-  initiateGoogleOAuthLogin 
-} from '../../utils/googleCalendar';
+  setupGoogleIdentitySignIn, 
+  openGoogleOAuthPopup, 
+  GOOGLE_AUTH_STORAGE_KEYS,
+  decodeGoogleJwt
+} from '../../utils/googleAuth';
 
-// Google Colored G Logo
-const GoogleIcon = ({ className = "w-4 h-4" }) => (
+// Biểu tượng Google chuẩn 4 màu chính thức (Google Brand Icon)
+export const GoogleIcon = ({ className = "w-5 h-5" }) => (
   <svg className={className} viewBox="0 0 24 24">
     <path
       fill="#4285F4"
@@ -64,10 +60,6 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
   const {
     currentUser,
     isAccountLoggedIn,
-    registerAccount,
-    loginAccount,
-    resetAccountPassword,
-    changeAccountPassword,
     logoutAccount,
     cloudSyncStatus,
     isCloudSyncing,
@@ -83,243 +75,166 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
     setGoogleClientId,
     setActiveTab: setAppActiveTab,
     showToast,
+    loginWithDecodedGoogleUser,
     loginWithGoogleAccount,
-    handleGoogleLoginSuccess,
   } = useApp();
 
-  // Active Tab: 'login' | 'google_login' | 'register' | 'reset_password' | 'profile'
-  const [activeTab, setActiveTab] = useState(() => {
-    return isAccountLoggedIn ? 'profile' : 'login';
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState(null);
+  const [showClientIdConfig, setShowClientIdConfig] = useState(false);
+  const [customClientIdInput, setCustomClientIdInput] = useState(() => {
+    return localStorage.getItem(GOOGLE_AUTH_STORAGE_KEYS.CLIENT_ID) || googleClientId || GOOGLE_CLIENT_ID;
   });
 
+  // Demo fallback state for instant testing
+  const [testEmail, setTestEmail] = useState('phong09829@gmail.com');
+  const [testName, setTestName] = useState('Phong Nguyễn');
+  const [showDemoBox, setShowDemoBox] = useState(false);
+
+  const googleButtonContainerRef = useRef(null);
+
+  // Active Client ID đang áp dụng
+  const activeClientId = customClientIdInput.trim() || GOOGLE_CLIENT_ID;
+  const isDefaultPlaceholder = !activeClientId || activeClientId === 'ĐIỀN_CLIENT_ID_CỦA_BẠN_VÀO_ĐÂY';
+
+  // Khởi tạo Google Identity Services (GIS) khi mở modal
   useEffect(() => {
-    if (isOpen) {
-      setActiveTab(isAccountLoggedIn ? 'profile' : 'login');
-    }
-  }, [isOpen, isAccountLoggedIn]);
+    if (!isOpen || isAccountLoggedIn) return;
 
-  // Standard Login Form State
-  const [loginEmail, setLoginEmail] = useState('phong09829@gmail.com');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [showLoginPassword, setShowLoginPassword] = useState(false);
-  const [loginError, setLoginError] = useState(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+    let isMounted = true;
 
-  // Google Login State (Gmail + Password standard Google Sign-In)
-  const [googleEmailInput, setGoogleEmailInput] = useState('phong09829@gmail.com');
-  const [googlePasswordInput, setGooglePasswordInput] = useState('');
-  const [showGooglePassword, setShowGooglePassword] = useState(false);
-  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
-  const [googleLoginError, setGoogleLoginError] = useState(null);
+    const initGIS = async () => {
+      try {
+        if (!isDefaultPlaceholder && googleButtonContainerRef.current) {
+          await setupGoogleIdentitySignIn({
+            clientId: activeClientId,
+            buttonContainer: googleButtonContainerRef.current,
+            renderButton: true,
+            promptOneTap: false,
+            buttonConfig: {
+              theme: 'outline',
+              size: 'large',
+              text: 'signin_with',
+              shape: 'pill',
+              width: 320,
+            },
+            onSuccess: async ({ user }) => {
+              if (!isMounted) return;
+              setIsLoading(true);
+              try {
+                if (loginWithDecodedGoogleUser) {
+                  await loginWithDecodedGoogleUser(user);
+                } else if (loginWithGoogleAccount) {
+                  await loginWithGoogleAccount(user.email, user.name);
+                }
+                if (setAppActiveTab) setAppActiveTab('calendar');
+                onClose();
+              } finally {
+                setIsLoading(false);
+              }
+            },
+            onError: (err) => {
+              console.warn('Google Identity error:', err);
+              if (isMounted && !isDefaultPlaceholder) {
+                setErrorMessage('Không thể kết nối Google Identity Services. Hãy kiểm tra Client ID hoặc Authorized Origins.');
+              }
+            },
+          });
+        }
+      } catch (err) {
+        console.warn('GIS Init error:', err);
+      }
+    };
 
-  // Register Form State
-  const [regName, setRegName] = useState('');
-  const [regEmail, setRegEmail] = useState('phong09829@gmail.com');
-  const [regPassword, setRegPassword] = useState('');
-  const [regConfirmPassword, setRegConfirmPassword] = useState('');
-  const [showRegPassword, setShowRegPassword] = useState(false);
-
-  // Reset Password Form State
-  const [resetEmail, setResetEmail] = useState('');
-  const [resetNewPassword, setResetNewPassword] = useState('');
-  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
-  const [showResetPassword, setShowResetPassword] = useState(false);
-
-  // Change Password Form State (in Profile tab)
-  const [oldPassword, setOldPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmNewPassword, setConfirmNewPassword] = useState('');
-  const [showChangePassword, setShowChangePassword] = useState(false);
+    const timer = setTimeout(initGIS, 150);
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [isOpen, isAccountLoggedIn, activeClientId, isDefaultPlaceholder]);
 
   if (!isOpen) return null;
 
-  // Handle Standard Login Submit
-  const handleLoginSubmit = async (e) => {
-    e.preventDefault();
-    setLoginError(null);
+  // Xử lý khi nhấn nút Đăng Nhập Google (Popup / GIS Flow)
+  const handleGoogleSignInClick = async () => {
+    setErrorMessage(null);
 
-    const email = loginEmail.trim();
-    if (!email) {
-      showToast('Vui lòng nhập địa chỉ Email/Gmail!', 'warning');
-      return;
-    }
-    if (!loginPassword) {
-      showToast('Vui lòng nhập mật khẩu!', 'warning');
+    // Nếu vẫn đang để placeholder thì gợi ý nhập Client ID hoặc bấm Dùng thử
+    if (isDefaultPlaceholder) {
+      setShowClientIdConfig(true);
+      showToast('Vui lòng thay thế "ĐIỀN_CLIENT_ID_CỦA_BẠN_VÀO_ĐÂY" bằng Google Client ID thật, hoặc bấm Dùng Thử Demo bên dưới!', 'info', 5000);
       return;
     }
 
-    setIsSubmitting(true);
+    setIsLoading(true);
     try {
-      const res = await loginAccount({
-        email: email,
-        password: loginPassword,
-      });
-
-      if (res && res.ok) {
-        if (setAppActiveTab) setAppActiveTab('calendar');
-        setActiveTab('profile');
-        onClose();
-      } else {
-        setLoginError(res);
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Handle Google / Gmail Login Submit (Standard Sign-In with Gmail & Password)
-  const handleGoogleGmailLoginSubmit = async (e) => {
-    if (e) e.preventDefault();
-    setGoogleLoginError(null);
-
-    const email = (googleEmailInput || 'phong09829@gmail.com').trim();
-    if (!email || !email.includes('@')) {
-      showToast('Vui lòng nhập địa chỉ Gmail hợp lệ!', 'warning');
-      return;
-    }
-
-    const password = googlePasswordInput ? googlePasswordInput.trim() : 'google123';
-
-    setIsGoogleSubmitting(true);
-    try {
-      const res = await loginAccount({
-        email: email,
-        password: password,
-        name: email.split('@')[0],
-      });
-
-      if (res && res.ok) {
-        if (setAppActiveTab) setAppActiveTab('calendar');
-        setActiveTab('profile');
-        onClose();
-      } else {
-        setGoogleLoginError(res);
-      }
-    } finally {
-      setIsGoogleSubmitting(false);
-    }
-  };
-
-  // Quick 1-Click Google Sign In (Auto-logs in without typing password)
-  const handleQuickOneClickGoogleLogin = async () => {
-    const email = (googleEmailInput || 'phong09829@gmail.com').trim();
-    if (!email || !email.includes('@')) {
-      showToast('Vui lòng nhập địa chỉ Gmail hợp lệ!', 'warning');
-      return;
-    }
-
-    setIsGoogleSubmitting(true);
-    try {
-      if (loginWithGoogleAccount) {
-        const ok = await loginWithGoogleAccount(email);
-        if (ok) {
+      await openGoogleOAuthPopup({
+        clientId: activeClientId,
+        onSuccess: async ({ user }) => {
+          if (loginWithDecodedGoogleUser) {
+            await loginWithDecodedGoogleUser(user);
+          } else if (loginWithGoogleAccount) {
+            await loginWithGoogleAccount(user.email, user.name);
+          }
           if (setAppActiveTab) setAppActiveTab('calendar');
           onClose();
-        }
-      }
-    } finally {
-      setIsGoogleSubmitting(false);
-    }
-  };
-
-  // Handle Register Submit
-  const handleRegisterSubmit = async (e) => {
-    e.preventDefault();
-    if (!regEmail.trim() || !regEmail.includes('@')) {
-      showToast('Vui lòng nhập địa chỉ Email/Gmail hợp lệ!', 'warning');
-      return;
-    }
-    if (!regPassword || regPassword.length < 4) {
-      showToast('Mật khẩu phải có ít nhất 4 ký tự!', 'warning');
-      return;
-    }
-    if (regPassword !== regConfirmPassword) {
-      showToast('Mật khẩu xác nhận không khớp! Vui lòng nhập lại.', 'warning');
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const res = await registerAccount({
-        email: regEmail.trim(),
-        password: regPassword,
-        name: regName.trim(),
+        },
+        onError: (err) => {
+          console.error('Google Sign-In Popup Error:', err);
+          setErrorMessage(err.message || 'Đăng nhập Google thất bại hoặc bị đóng cửa sổ.');
+        },
       });
-
-      if (res && res.ok) {
-        if (setAppActiveTab) setAppActiveTab('calendar');
-        setActiveTab('profile');
-        onClose();
-      }
+    } catch (err) {
+      console.error('Google Sign In click error:', err);
+      setErrorMessage(err.message || 'Lỗi khi kích hoạt Google Sign-In.');
     } finally {
-      setIsSubmitting(false);
+      setIsLoading(false);
     }
   };
 
-  // Handle Reset Password Submit
-  const handleResetPasswordSubmit = async (e) => {
-    e.preventDefault();
-    if (!resetEmail.trim() || !resetEmail.includes('@')) {
-      showToast('Vui lòng nhập địa chỉ Email hợp lệ!', 'warning');
-      return;
-    }
-    if (!resetNewPassword || resetNewPassword.length < 4) {
-      showToast('Mật khẩu mới phải có ít nhất 4 ký tự!', 'warning');
-      return;
-    }
-    if (resetNewPassword !== resetConfirmPassword) {
-      showToast('Xác nhận mật khẩu mới không khớp!', 'warning');
-      return;
-    }
-
-    setIsSubmitting(true);
+  // Trải nghiệm tức thì với Demo Google Account (Dành cho việc test nhanh luồng trích xuất thông tin)
+  const handleTestDemoGoogleLogin = async () => {
+    setIsLoading(true);
     try {
-      const res = await resetAccountPassword({
-        email: resetEmail.trim(),
-        newPassword: resetNewPassword,
-      });
+      const demoUser = {
+        id: `gusr-demo-${Date.now()}`,
+        name: testName.trim() || 'Người dùng Google',
+        email: testEmail.trim() || 'phong09829@gmail.com',
+        picture: `https://api.dicebear.com/7.x/bottts/svg?seed=${testEmail.trim() || 'phong09829'}`,
+        emailVerified: true,
+      };
 
-      if (res && res.ok) {
-        if (setAppActiveTab) setAppActiveTab('calendar');
-        setActiveTab('profile');
-        onClose();
+      if (loginWithDecodedGoogleUser) {
+        await loginWithDecodedGoogleUser(demoUser);
+      } else if (loginWithGoogleAccount) {
+        await loginWithGoogleAccount(demoUser.email, demoUser.name);
       }
+
+      if (setAppActiveTab) setAppActiveTab('calendar');
+      onClose();
     } finally {
-      setIsSubmitting(false);
+      setIsLoading(false);
     }
   };
 
-  // Handle Change Password (inside Profile)
-  const handleChangePasswordSubmit = async (e) => {
+  // Lưu Client ID mới vào bộ nhớ
+  const handleSaveClientId = (e) => {
     e.preventDefault();
-    if (!oldPassword) {
-      showToast('Vui lòng nhập mật khẩu hiện tại!', 'warning');
-      return;
-    }
-    if (!newPassword || newPassword.length < 4) {
-      showToast('Mật khẩu mới phải có ít nhất 4 ký tự!', 'warning');
-      return;
-    }
-    if (newPassword !== confirmNewPassword) {
-      showToast('Xác nhận mật khẩu mới không khớp!', 'warning');
+    const cleanId = customClientIdInput.trim();
+    if (!cleanId) {
+      showToast('Client ID không được để trống!', 'warning');
       return;
     }
 
-    const res = await changeAccountPassword({
-      oldPassword,
-      newPassword,
-    });
-
-    if (res && res.ok) {
-      setOldPassword('');
-      setNewPassword('');
-      setConfirmNewPassword('');
-    }
+    localStorage.setItem(GOOGLE_AUTH_STORAGE_KEYS.CLIENT_ID, cleanId);
+    if (setGoogleClientId) setGoogleClientId(cleanId);
+    showToast('Đã lưu cấu hình Google Client ID thành công!', 'success');
+    setShowClientIdConfig(false);
   };
 
   const handleExportBackup = () => {
     exportFullBackup(currentUser, { tasks, events, pomoSessions, settings });
-    showToast('Đã xuất file sao lưu dữ liệu (.json) thành công!', 'success');
+    showToast('Đã xuất file sao lưu dữ liệu (.json) an toàn!', 'success');
   };
 
   const formatSyncTime = (timeStr) => {
@@ -334,15 +249,16 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="w-full max-w-[440px] rounded-3xl bg-[#0B1528] border border-slate-800/90 shadow-2xl shadow-cyan-950/40 overflow-hidden relative text-slate-100 flex flex-col max-h-[92vh]">
+      <div className="w-full max-w-[460px] rounded-3xl bg-[#0C1322] border border-slate-800 shadow-2xl shadow-indigo-950/50 overflow-hidden relative text-slate-100 flex flex-col max-h-[92vh]">
         
-        {/* Subtle Ambient Top Glow */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-24 bg-cyan-500/10 blur-3xl pointer-events-none rounded-full" />
+        {/* Subtle Ambient Decorative Glows */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-24 bg-blue-500/15 blur-3xl pointer-events-none rounded-full" />
+        <div className="absolute bottom-0 right-0 w-48 h-32 bg-indigo-500/10 blur-3xl pointer-events-none rounded-full" />
 
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 z-10 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition cursor-pointer"
+          className="absolute top-4 right-4 z-10 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/80 transition cursor-pointer"
           aria-label="Close modal"
         >
           <X className="w-5 h-5" />
@@ -351,650 +267,226 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
         {/* Modal Scrollable Container */}
         <div className="p-6 sm:p-8 overflow-y-auto">
 
-          {/* ===================== VIEW 1: GOOGLE / GMAIL SIGN IN ===================== */}
-          {activeTab === 'google_login' && (
-            <div>
-              {/* Google Badge */}
-              <div className="w-14 h-14 rounded-2xl bg-[#132A45] border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-500/15 mx-auto">
-                <GoogleIcon className="w-7 h-7" />
+          {/* ===================== VIEW 1: GOOGLE SIGN IN (Khi Chưa Đăng Nhập) ===================== */}
+          {!isAccountLoggedIn && (
+            <div className="space-y-6">
+              
+              {/* Header with Google Logo */}
+              <div className="text-center pt-2">
+                <div className="relative inline-flex items-center justify-center">
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-b from-[#17233D] to-[#0F192C] border border-slate-700/80 flex items-center justify-center shadow-xl shadow-blue-500/10">
+                    <GoogleIcon className="w-8 h-8" />
+                  </div>
+                  <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-md border-2 border-[#0C1322]">
+                    <Sparkles className="w-3 h-3" />
+                  </div>
+                </div>
+
+                <h2 className="text-2xl sm:text-[26px] font-extrabold text-white mt-4 tracking-tight">
+                  Đăng nhập với Google
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-400 mt-1.5 leading-relaxed max-w-xs mx-auto">
+                  Sử dụng Google Identity Services để đồng bộ Lịch trình, Công việc và Pomodoro tức thì.
+                </p>
               </div>
 
-              {/* Title & Subtitle */}
-              <h2 className="text-2xl sm:text-[25px] font-extrabold text-white text-center mt-4 tracking-tight">
-                Đăng nhập với Google
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-400 text-center mt-1.5 mb-5 leading-relaxed">
-                Sử dụng tài khoản Google (Gmail) để mở thẳng vào <span className="text-cyan-400 font-bold">Schedule</span>
-              </p>
-
               {/* Error Alert */}
-              {googleLoginError && (
-                <div className="mb-4 p-3 rounded-xl bg-rose-950/50 border border-rose-800/60 text-xs text-rose-300 flex items-start gap-2">
+              {errorMessage && (
+                <div className="p-3.5 rounded-2xl bg-rose-950/50 border border-rose-800/60 text-xs text-rose-300 flex items-start gap-2.5">
                   <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                   <div className="flex-1">
-                    <span>{googleLoginError.message || 'Mật khẩu hoặc email không chính xác!'}</span>
-                    {googleLoginError.errorType === 'WRONG_PASSWORD' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setResetEmail(googleEmailInput);
-                          setActiveTab('reset_password');
-                        }}
-                        className="block mt-1 text-cyan-400 hover:underline font-bold text-[11px]"
-                      >
-                        → Bấm vào đây để đặt lại mật khẩu mới
-                      </button>
-                    )}
+                    <p className="font-semibold">{errorMessage}</p>
                   </div>
                 </div>
               )}
 
-              {/* Google Sign-In Form */}
-              <form onSubmit={handleGoogleGmailLoginSubmit} className="space-y-3.5">
+              {/* Google Identity Services Official & Custom Buttons */}
+              <div className="space-y-3 pt-1">
                 
-                {/* Gmail Field */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                      TÀI KHOẢN GOOGLE / GMAIL
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setGoogleEmailInput('phong09829@gmail.com')}
-                      className="text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold"
-                    >
-                      Dùng phong09829@gmail.com
-                    </button>
-                  </div>
-                  <div className="relative flex items-center">
-                    <Mail className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
-                    <input
-                      type="email"
-                      required
-                      value={googleEmailInput}
-                      onChange={(e) => {
-                        setGoogleEmailInput(e.target.value);
-                        setGoogleLoginError(null);
-                      }}
-                      placeholder="phong09829@gmail.com"
-                      className="w-full pl-10 pr-3 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
-                    />
-                  </div>
-                </div>
+                {/* 1. GIS Official Button Container (Rendered by Google Script when valid Client ID) */}
+                <div 
+                  ref={googleButtonContainerRef} 
+                  id="google-gis-signin-button"
+                  className="flex justify-center empty:hidden"
+                />
 
-                {/* Password Field */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                      MẬT KHẨU
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setResetEmail(googleEmailInput);
-                        setActiveTab('reset_password');
-                      }}
-                      className="text-xs font-semibold text-cyan-400 hover:text-cyan-300 transition hover:underline"
-                    >
-                      Quên mật khẩu?
-                    </button>
-                  </div>
-                  <div className="relative flex items-center">
-                    <Lock className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
-                    <input
-                      type={showGooglePassword ? 'text' : 'password'}
-                      required
-                      value={googlePasswordInput}
-                      onChange={(e) => {
-                        setGooglePasswordInput(e.target.value);
-                        setGoogleLoginError(null);
-                      }}
-                      placeholder="Nhập mật khẩu tài khoản"
-                      className="w-full pl-10 pr-10 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowGooglePassword(!showGooglePassword)}
-                      className="absolute right-3.5 text-slate-400 hover:text-slate-200 transition cursor-pointer"
-                      tabIndex="-1"
-                    >
-                      {showGooglePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Submit Google Login Button */}
+                {/* 2. Modern Standard Google Sign-In Button */}
                 <button
-                  type="submit"
-                  disabled={isGoogleSubmitting}
-                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 hover:from-blue-500 hover:to-cyan-300 text-white font-bold text-sm shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2.5 transition-all active:scale-[0.99] disabled:opacity-70 mt-3 cursor-pointer"
+                  type="button"
+                  onClick={handleGoogleSignInClick}
+                  disabled={isLoading}
+                  className="w-full group relative flex items-center justify-center gap-3 py-3.5 px-5 rounded-2xl bg-white hover:bg-slate-100 text-slate-800 font-bold text-sm sm:text-base shadow-xl shadow-slate-950/40 border border-slate-200 transition-all duration-200 active:scale-[0.99] disabled:opacity-70 cursor-pointer"
                 >
-                  {isGoogleSubmitting ? (
+                  {isLoading ? (
                     <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Đang đăng nhập Google...</span>
+                      <RefreshCw className="w-5 h-5 animate-spin text-blue-600" />
+                      <span className="text-slate-700">Đang kết nối Google...</span>
                     </>
                   ) : (
                     <>
-                      <GoogleIcon className="w-4 h-4 shrink-0" />
-                      <span>Đăng Nhập Google & Mở Schedule →</span>
+                      <GoogleIcon className="w-5 h-5 shrink-0 group-hover:scale-110 transition-transform" />
+                      <span>Tiếp tục với Google</span>
                     </>
                   )}
                 </button>
-              </form>
-
-              {/* Divider */}
-              <div className="relative flex items-center justify-center my-4">
-                <div className="border-t border-slate-800 w-full" />
-                <span className="bg-[#0B1528] px-3 text-[10px] font-bold tracking-widest text-slate-500 uppercase">
-                  HOẶC
-                </span>
-                <div className="border-t border-slate-800 w-full" />
               </div>
 
-              {/* 1-Click Direct Fast Sign-in */}
-              <button
-                type="button"
-                disabled={isGoogleSubmitting}
-                onClick={handleQuickOneClickGoogleLogin}
-                className="w-full py-2.5 px-4 rounded-xl bg-[#131E34] hover:bg-[#1A2845] border border-cyan-500/40 flex items-center justify-center gap-2 text-cyan-300 font-semibold text-xs transition-all shadow-sm cursor-pointer"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                <span>Đăng Nhập Nhanh 1-Chạm ({googleEmailInput || 'phong09829@gmail.com'})</span>
-              </button>
+              {/* Client ID Setup Notice & Expandable Box */}
+              <div className="pt-2 border-t border-slate-800/80">
+                <div className="p-3.5 rounded-2xl bg-[#121B2D] border border-slate-700/60 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <KeyRound className="w-4 h-4 text-amber-400" />
+                      <span className="text-xs font-bold text-slate-200">Cấu hình Client ID Google</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowClientIdConfig(!showClientIdConfig)}
+                      className="text-[11px] text-blue-400 hover:text-blue-300 font-bold flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <span>{showClientIdConfig ? 'Thu gọn' : 'Tùy chỉnh'}</span>
+                      {showClientIdConfig ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    </button>
+                  </div>
 
-              {/* Switch link */}
-              <div className="mt-5 text-center text-xs text-slate-400">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('login')}
-                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline cursor-pointer"
-                >
-                  ← Đăng nhập bằng Email khác
-                </button>
-              </div>
-            </div>
-          )}
+                  {/* Prominent Client ID Display */}
+                  <div className="p-2 rounded-xl bg-[#090E18] border border-slate-800 font-mono text-[11px] text-slate-300 flex items-center justify-between overflow-hidden">
+                    <div className="truncate flex-1 pr-2">
+                      <span className="text-slate-500 mr-1.5">CLIENT_ID:</span>
+                      {isDefaultPlaceholder ? (
+                        <span className="text-amber-400 font-bold bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/30">
+                          ĐIỀN_CLIENT_ID_CỦA_BẠN_VÀO_ĐÂY
+                        </span>
+                      ) : (
+                        <span className="text-emerald-400 font-semibold">{activeClientId}</span>
+                      )}
+                    </div>
+                  </div>
 
-          {/* ===================== VIEW 2: STANDARD EMAIL LOGIN ===================== */}
-          {activeTab === 'login' && (
-            <div>
-              {/* Anchor Badge */}
-              <div className="w-14 h-14 rounded-2xl bg-[#132A45] border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-500/15 mx-auto">
-                <Anchor className="w-7 h-7" />
-              </div>
+                  {/* Expandable Form to Paste Client ID */}
+                  {showClientIdConfig && (
+                    <form onSubmit={handleSaveClientId} className="pt-2 space-y-2.5 animate-fade-in border-t border-slate-800">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                          Dán Client ID từ Google Cloud Console:
+                        </label>
+                        <input
+                          type="text"
+                          value={customClientIdInput}
+                          onChange={(e) => setCustomClientIdInput(e.target.value)}
+                          placeholder="ĐIỀN_CLIENT_ID_CỦA_BẠN_VÀO_ĐÂY"
+                          className="w-full px-3 py-2 rounded-xl bg-[#090E18] border border-slate-700 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-blue-400"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-slate-400">
+                        <span>Hoặc sửa trực tiếp tại: <code className="text-blue-400">src/config/authConfig.js</code></span>
+                        <button
+                          type="submit"
+                          className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow transition cursor-pointer"
+                        >
+                          Lưu ID
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
 
-              {/* Title & Subtitle */}
-              <h2 className="text-2xl sm:text-[26px] font-extrabold text-white text-center mt-4 tracking-tight">
-                Chào mừng trở lại
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-400 text-center mt-1.5 mb-6 leading-relaxed">
-                Đăng nhập để tiếp tục hành trình khám phá đại dương
-              </p>
+                {/* Instant Demo Sandbox (Dùng Thử Nhanh) */}
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowDemoBox(!showDemoBox)}
+                    className="w-full py-2.5 px-3.5 rounded-xl bg-slate-900/80 hover:bg-slate-800/80 border border-slate-800 text-slate-400 hover:text-slate-200 text-xs font-semibold flex items-center justify-between transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Trải nghiệm thử nhanh (Mô phỏng trích xuất Tên & Email)</span>
+                    </span>
+                    {showDemoBox ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </button>
 
-              {/* Error Alert */}
-              {loginError && (
-                <div className="mb-4 p-3 rounded-xl bg-rose-950/50 border border-rose-800/60 text-xs text-rose-300 flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <span>{loginError.message || 'Email hoặc mật khẩu không chính xác!'}</span>
-                    {loginError.errorType === 'WRONG_PASSWORD' && (
+                  {showDemoBox && (
+                    <div className="p-3.5 mt-2 rounded-2xl bg-[#121B2D] border border-slate-800 space-y-2.5 animate-fade-in">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-400 mb-1">Tên hiển thị</label>
+                          <input
+                            type="text"
+                            value={testName}
+                            onChange={(e) => setTestName(e.target.value)}
+                            placeholder="Phong Nguyễn"
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-[#090E18] border border-slate-700 text-xs text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-400 mb-1">Gmail</label>
+                          <input
+                            type="email"
+                            value={testEmail}
+                            onChange={(e) => setTestEmail(e.target.value)}
+                            placeholder="phong09829@gmail.com"
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-[#090E18] border border-slate-700 text-xs text-white"
+                          />
+                        </div>
+                      </div>
                       <button
                         type="button"
-                        onClick={() => {
-                          setResetEmail(loginEmail);
-                          setActiveTab('reset_password');
-                        }}
-                        className="block mt-1 text-cyan-400 hover:underline font-bold text-[11px]"
+                        onClick={handleTestDemoGoogleLogin}
+                        disabled={isLoading}
+                        className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs shadow-md transition flex items-center justify-center gap-1.5 cursor-pointer"
                       >
-                        → Bấm vào đây để đặt lại mật khẩu mới
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Đăng Nhập Thử Ngay ({testEmail})</span>
                       </button>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Login Form */}
-              <form onSubmit={handleLoginSubmit} className="space-y-4">
-                
-                {/* Email Field */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                    EMAIL / GMAIL
-                  </label>
-                  <div className="relative flex items-center">
-                    <Mail className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
-                    <input
-                      type="email"
-                      required
-                      value={loginEmail}
-                      onChange={(e) => {
-                        setLoginEmail(e.target.value);
-                        setLoginError(null);
-                      }}
-                      placeholder="phong09829@gmail.com"
-                      className="w-full pl-10 pr-3 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
-                    />
-                  </div>
-                </div>
-
-                {/* Password Field */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                      MẬT KHẨU
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setResetEmail(loginEmail);
-                        setActiveTab('reset_password');
-                      }}
-                      className="text-xs font-semibold text-cyan-400 hover:text-cyan-300 transition hover:underline"
-                    >
-                      Quên mật khẩu?
-                    </button>
-                  </div>
-                  <div className="relative flex items-center">
-                    <Lock className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
-                    <input
-                      type={showLoginPassword ? 'text' : 'password'}
-                      required
-                      value={loginPassword}
-                      onChange={(e) => {
-                        setLoginPassword(e.target.value);
-                        setLoginError(null);
-                      }}
-                      placeholder="••••••••"
-                      className="w-full pl-10 pr-10 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowLoginPassword(!showLoginPassword)}
-                      className="absolute right-3.5 text-slate-400 hover:text-slate-200 transition cursor-pointer"
-                      tabIndex="-1"
-                    >
-                      {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Submit Button */}
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 hover:from-blue-500 hover:to-cyan-300 text-white font-bold text-sm sm:text-base shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-70 mt-2 cursor-pointer"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Đang kết nối...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Bắt đầu khám phá</span>
-                      <span className="text-lg leading-none">→</span>
-                    </>
+                    </div>
                   )}
-                </button>
-              </form>
-
-              {/* Divider */}
-              <div className="relative flex items-center justify-center my-5">
-                <div className="border-t border-slate-800 w-full" />
-                <span className="bg-[#0B1528] px-3 text-[11px] font-bold tracking-widest text-slate-500 uppercase">
-                  HOẶC
-                </span>
-                <div className="border-t border-slate-800 w-full" />
+                </div>
               </div>
 
-              {/* Google Login Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  setGoogleEmailInput(loginEmail || 'phong09829@gmail.com');
-                  setActiveTab('google_login');
-                }}
-                className="w-full py-3 px-4 rounded-xl bg-[#131E34] hover:bg-[#1A2845] border border-slate-700/60 flex items-center justify-center gap-3 text-slate-200 font-semibold text-xs sm:text-sm transition-all shadow-sm cursor-pointer hover:border-cyan-500/40"
-              >
-                <GoogleIcon className="w-4 h-4 shrink-0" />
-                <span>Đăng nhập bằng Google</span>
-              </button>
-
-              {/* Bottom Switch Link */}
-              <div className="mt-6 text-center text-xs sm:text-sm text-slate-400">
-                <span>Chưa có tài khoản? </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRegEmail(loginEmail);
-                    setActiveTab('register');
-                  }}
-                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline cursor-pointer"
-                >
-                  Đăng ký miễn phí
-                </button>
+              {/* Footer Privacy Guarantee */}
+              <div className="text-center text-[11px] text-slate-500 leading-relaxed">
+                Bảo mật theo tiêu chuẩn Google OAuth 2.0 & GIS. Dữ liệu cá nhân của bạn được lưu trữ an toàn.
               </div>
+
             </div>
           )}
 
-          {/* ===================== VIEW 3: REGISTER ===================== */}
-          {activeTab === 'register' && (
-            <div>
-              {/* Anchor Badge */}
-              <div className="w-14 h-14 rounded-2xl bg-[#132A45] border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-500/15 mx-auto">
-                <Anchor className="w-7 h-7" />
-              </div>
-
-              {/* Title & Subtitle */}
-              <h2 className="text-2xl sm:text-[26px] font-extrabold text-white text-center mt-4 tracking-tight">
-                Tạo tài khoản mới
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-400 text-center mt-1.5 mb-6 leading-relaxed">
-                Bắt đầu hành trình khám phá đại dương của bạn
-              </p>
-
-              {/* Register Form */}
-              <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
-                
-                {/* Name */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    TÊN HIỂN THỊ (TÙY CHỌN)
-                  </label>
-                  <div className="relative flex items-center">
-                    <User className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={regName}
-                      onChange={(e) => setRegName(e.target.value)}
-                      placeholder="VD: Hải Trình"
-                      className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
-                    />
-                  </div>
-                </div>
-
-                {/* Email */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    EMAIL / GMAIL
-                  </label>
-                  <div className="relative flex items-center">
-                    <Mail className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
-                    <input
-                      type="email"
-                      required
-                      value={regEmail}
-                      onChange={(e) => setRegEmail(e.target.value)}
-                      placeholder="phong09829@gmail.com"
-                      className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
-                    />
-                  </div>
-                </div>
-
-                {/* Password */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    MẬT KHẨU
-                  </label>
-                  <div className="relative flex items-center">
-                    <Lock className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
-                    <input
-                      type={showRegPassword ? 'text' : 'password'}
-                      required
-                      minLength={4}
-                      value={regPassword}
-                      onChange={(e) => setRegPassword(e.target.value)}
-                      placeholder="Tối thiểu 4 ký tự"
-                      className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowRegPassword(!showRegPassword)}
-                      className="absolute right-3.5 text-slate-400 hover:text-slate-200 transition cursor-pointer"
-                      tabIndex="-1"
-                    >
-                      {showRegPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Confirm Password */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    XÁC NHẬN MẬT KHẨU
-                  </label>
-                  <div className="relative flex items-center">
-                    <Lock className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
-                    <input
-                      type={showRegPassword ? 'text' : 'password'}
-                      required
-                      value={regConfirmPassword}
-                      onChange={(e) => setRegConfirmPassword(e.target.value)}
-                      placeholder="Nhập lại mật khẩu"
-                      className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
-                    />
-                  </div>
-                </div>
-
-                {/* Submit Button */}
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 hover:from-blue-500 hover:to-cyan-300 text-white font-bold text-sm sm:text-base shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-70 mt-3 cursor-pointer"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Đang tạo tài khoản...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Đăng ký miễn phí</span>
-                      <span className="text-lg leading-none">→</span>
-                    </>
-                  )}
-                </button>
-              </form>
-
-              {/* Divider */}
-              <div className="relative flex items-center justify-center my-4">
-                <div className="border-t border-slate-800 w-full" />
-                <span className="bg-[#0B1528] px-3 text-[11px] font-bold tracking-widest text-slate-500 uppercase">
-                  HOẶC
-                </span>
-                <div className="border-t border-slate-800 w-full" />
-              </div>
-
-              {/* Google Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  setGoogleEmailInput(regEmail || 'phong09829@gmail.com');
-                  setActiveTab('google_login');
-                }}
-                className="w-full py-2.5 px-4 rounded-xl bg-[#131E34] hover:bg-[#1A2845] border border-slate-700/60 flex items-center justify-center gap-3 text-slate-200 font-semibold text-xs sm:text-sm transition-all shadow-sm cursor-pointer hover:border-cyan-500/40"
-              >
-                <GoogleIcon className="w-4 h-4 shrink-0" />
-                <span>Đăng nhập bằng Google</span>
-              </button>
-
-              {/* Bottom Switch Link */}
-              <div className="mt-5 text-center text-xs sm:text-sm text-slate-400">
-                <span>Đã có tài khoản? </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setLoginEmail(regEmail);
-                    setActiveTab('login');
-                  }}
-                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline cursor-pointer"
-                >
-                  Đăng nhập ngay
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* ===================== VIEW 4: RESET PASSWORD ===================== */}
-          {activeTab === 'reset_password' && (
-            <div>
-              {/* Anchor Badge */}
-              <div className="w-14 h-14 rounded-2xl bg-[#132A45] border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-500/15 mx-auto">
-                <Anchor className="w-7 h-7" />
-              </div>
-
-              {/* Title & Subtitle */}
-              <h2 className="text-2xl sm:text-[26px] font-extrabold text-white text-center mt-4 tracking-tight">
-                Đặt lại mật khẩu
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-400 text-center mt-1.5 mb-6 leading-relaxed">
-                Nhập email và mật khẩu mới để tiếp tục hành trình
-              </p>
-
-              {/* Reset Password Form */}
-              <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
-                
-                {/* Email */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                    EMAIL / GMAIL
-                  </label>
-                  <div className="relative flex items-center">
-                    <Mail className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
-                    <input
-                      type="email"
-                      required
-                      value={resetEmail}
-                      onChange={(e) => setResetEmail(e.target.value)}
-                      placeholder="phong09829@gmail.com"
-                      className="w-full pl-10 pr-3 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
-                    />
-                  </div>
-                </div>
-
-                {/* New Password */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                    MẬT KHẨU MỚI
-                  </label>
-                  <div className="relative flex items-center">
-                    <Lock className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
-                    <input
-                      type={showResetPassword ? 'text' : 'password'}
-                      required
-                      minLength={4}
-                      value={resetNewPassword}
-                      onChange={(e) => setResetNewPassword(e.target.value)}
-                      placeholder="Tối thiểu 4 ký tự"
-                      className="w-full pl-10 pr-10 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowResetPassword(!showResetPassword)}
-                      className="absolute right-3.5 text-slate-400 hover:text-slate-200 transition cursor-pointer"
-                      tabIndex="-1"
-                    >
-                      {showResetPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Confirm New Password */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                    XÁC NHẬN MẬT KHẨU MỚI
-                  </label>
-                  <div className="relative flex items-center">
-                    <Lock className="w-4 h-4 absolute left-3.5 text-slate-400 pointer-events-none" />
-                    <input
-                      type={showResetPassword ? 'text' : 'password'}
-                      required
-                      value={resetConfirmPassword}
-                      onChange={(e) => setResetConfirmPassword(e.target.value)}
-                      placeholder="Nhập lại mật khẩu mới"
-                      className="w-full pl-10 pr-3 py-3 rounded-xl bg-[#131E34] border border-slate-700/60 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 text-xs sm:text-sm font-medium text-white placeholder-slate-500 focus:outline-none transition"
-                    />
-                  </div>
-                </div>
-
-                {/* Submit Button */}
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 hover:from-blue-500 hover:to-cyan-300 text-white font-bold text-sm sm:text-base shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-70 mt-2 cursor-pointer"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Đang cập nhật...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Cập nhật mật khẩu</span>
-                      <span className="text-lg leading-none">→</span>
-                    </>
-                  )}
-                </button>
-              </form>
-
-              {/* Bottom Switch Link */}
-              <div className="mt-6 text-center text-xs sm:text-sm text-slate-400">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setLoginEmail(resetEmail);
-                    setActiveTab('login');
-                  }}
-                  className="text-cyan-400 hover:text-cyan-300 font-bold transition hover:underline cursor-pointer"
-                >
-                  ← Quay lại Đăng nhập
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* ===================== VIEW 5: PROFILE & CLOUD (When Logged In) ===================== */}
-          {activeTab === 'profile' && currentUser && (
+          {/* ===================== VIEW 2: PROFILE VIEW (Khi Đã Đăng Nhập) ===================== */}
+          {isAccountLoggedIn && currentUser && (
             <div className="space-y-4">
               
-              {/* Header Status Card */}
-              <div className="p-4 rounded-2xl bg-[#131E34] border border-slate-700/70">
+              {/* User Identity Card */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-[#121B2D] border border-slate-700/70 shadow-lg">
+                
                 <div className="flex items-center justify-between pb-3 border-b border-slate-800">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <Anchor className="w-3.5 h-3.5 text-cyan-400" />
-                    Đồng Bộ Đám Mây
+                    <GoogleIcon className="w-3.5 h-3.5" />
+                    Tài Khoản Google Đã Kết Nối
                   </span>
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                    cloudSyncStatus === 'syncing' || isCloudSyncing
-                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                      : cloudSyncStatus === 'offline'
-                      ? 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
-                      : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
-                  }`}>
-                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-                    {isCloudSyncing ? 'Đang đồng bộ...' : 'Đã kết nối'}
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                    Đã xác thực
                   </span>
                 </div>
 
-                <div className="mt-3 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
+                <div className="mt-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3.5">
                     {currentUser.avatar ? (
                       <img 
                         src={currentUser.avatar} 
                         alt={currentUser.name || 'User'} 
-                        className="w-11 h-11 rounded-xl border border-cyan-500/40 object-cover shadow-md"
+                        className="w-12 h-12 rounded-2xl border-2 border-blue-500/40 object-cover shadow-md"
                       />
                     ) : (
-                      <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-400 text-white flex items-center justify-center font-extrabold text-base shadow-md">
-                        {currentUser.name?.charAt(0) || currentUser.email?.charAt(0) || 'U'}
+                      <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-500 to-purple-500 text-white flex items-center justify-center font-extrabold text-lg shadow-md">
+                        {currentUser.name?.charAt(0) || currentUser.email?.charAt(0) || 'G'}
                       </div>
                     )}
                     <div>
-                      <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
-                        <span>{currentUser.name || 'Người dùng'}</span>
+                      <h4 className="text-base font-extrabold text-white flex items-center gap-1.5">
+                        <span>{currentUser.name || 'Người dùng Google'}</span>
                       </h4>
-                      <p className="text-xs text-slate-400 font-mono">{currentUser.email}</p>
+                      <p className="text-xs text-slate-400 font-mono mt-0.5">{currentUser.email}</p>
                     </div>
                   </div>
 
@@ -1002,7 +494,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                     <button
                       onClick={() => syncWithCloud(true)}
                       disabled={isCloudSyncing}
-                      className="p-2 rounded-xl text-cyan-400 hover:bg-cyan-500/10 border border-cyan-500/30 text-xs font-bold transition cursor-pointer"
+                      className="p-2 rounded-xl text-blue-400 hover:bg-blue-500/10 border border-blue-500/30 text-xs font-bold transition cursor-pointer"
                       title="Đồng bộ ngay dữ liệu"
                     >
                       <RefreshCw className={`w-4 h-4 ${isCloudSyncing ? 'animate-spin' : ''}`} />
@@ -1018,18 +510,18 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                   </div>
                 </div>
 
-                {/* Storage Metrics */}
+                {/* Data Metrics */}
                 <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-800 text-center">
-                  <div className="p-2 rounded-xl bg-[#0B1528] border border-slate-800">
-                    <span className="block text-base font-extrabold text-cyan-400">{events.length}</span>
+                  <div className="p-2 rounded-xl bg-[#090E18] border border-slate-800">
+                    <span className="block text-base font-extrabold text-blue-400">{events.length}</span>
                     <span className="text-[10px] font-semibold text-slate-400">Lịch trình</span>
                   </div>
-                  <div className="p-2 rounded-xl bg-[#0B1528] border border-slate-800">
-                    <span className="block text-base font-extrabold text-sky-400">{tasks.length}</span>
+                  <div className="p-2 rounded-xl bg-[#090E18] border border-slate-800">
+                    <span className="block text-base font-extrabold text-indigo-400">{tasks.length}</span>
                     <span className="text-[10px] font-semibold text-slate-400">Công việc</span>
                   </div>
-                  <div className="p-2 rounded-xl bg-[#0B1528] border border-slate-800">
-                    <span className="block text-base font-extrabold text-blue-400">{pomoSessions.length}</span>
+                  <div className="p-2 rounded-xl bg-[#090E18] border border-slate-800">
+                    <span className="block text-base font-extrabold text-purple-400">{pomoSessions.length}</span>
                     <span className="text-[10px] font-semibold text-slate-400">Pomodoro</span>
                   </div>
                 </div>
@@ -1042,11 +534,11 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                 </div>
               </div>
 
-              {/* 1-Click Phone Link */}
-              <div className="p-3.5 rounded-2xl bg-[#131E34] border border-slate-700/70 space-y-2">
+              {/* 1-Click Mobile Phone Linking */}
+              <div className="p-3.5 rounded-2xl bg-[#121B2D] border border-slate-700/70 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
-                    <Smartphone className="w-4 h-4 text-cyan-400" />
+                  <span className="text-xs font-bold text-blue-300 flex items-center gap-1.5">
+                    <Smartphone className="w-4 h-4 text-blue-400" />
                     <span>Đồng Bộ Sang Điện Thoại (1-Chạm)</span>
                   </span>
                 </div>
@@ -1062,7 +554,7 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                         showToast('Đã sao chép liên kết 1-chạm sang điện thoại!', 'success');
                       }
                     }}
-                    className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
+                    className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
                   >
                     <LinkIcon className="w-3.5 h-3.5" />
                     <span>Sao Chép Link Điện Thoại</span>
@@ -1084,10 +576,10 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
               </div>
 
               {/* Offline Backup Export */}
-              <div className="p-3.5 rounded-2xl bg-[#131E34] border border-slate-700/70 flex items-center justify-between">
+              <div className="p-3.5 rounded-2xl bg-[#121B2D] border border-slate-700/70 flex items-center justify-between">
                 <div>
                   <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                    <FileJson className="w-4 h-4 text-cyan-400" />
+                    <FileJson className="w-4 h-4 text-blue-400" />
                     Sao Lưu File Dữ Liệu Offline (.json)
                   </span>
                   <p className="text-[11px] text-slate-400 mt-0.5">
@@ -1097,83 +589,12 @@ export const GoogleConfigModal = ({ isOpen, onClose }) => {
                 <button
                   type="button"
                   onClick={handleExportBackup}
-                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-300 border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Tải File</span>
                 </button>
               </div>
-
-              {/* Change Password Sub-form */}
-              <form onSubmit={handleChangePasswordSubmit} className="space-y-3 p-3.5 rounded-2xl bg-[#131E34] border border-slate-700/70">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                    <Lock className="w-3.5 h-3.5 text-cyan-400" /> Đổi mật khẩu tài khoản
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowChangePassword(!showChangePassword)}
-                    className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer"
-                  >
-                    {showChangePassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    <span>{showChangePassword ? 'Ẩn' : 'Hiện'}</span>
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <div>
-                    <label className="block text-[10px] font-semibold text-slate-400 mb-1">
-                      Mật khẩu cũ
-                    </label>
-                    <input
-                      type={showChangePassword ? 'text' : 'password'}
-                      required
-                      value={oldPassword}
-                      onChange={(e) => setOldPassword(e.target.value)}
-                      placeholder="Mật khẩu cũ"
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-[#0B1528] border border-slate-700 text-xs font-semibold text-white focus:outline-none focus:border-cyan-400"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-semibold text-slate-400 mb-1">
-                      Mật khẩu mới
-                    </label>
-                    <input
-                      type={showChangePassword ? 'text' : 'password'}
-                      required
-                      minLength={4}
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="Tối thiểu 4 ký tự"
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-[#0B1528] border border-slate-700 text-xs font-semibold text-white focus:outline-none focus:border-cyan-400"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-semibold text-slate-400 mb-1">
-                      Xác nhận
-                    </label>
-                    <input
-                      type={showChangePassword ? 'text' : 'password'}
-                      required
-                      value={confirmNewPassword}
-                      onChange={(e) => setConfirmNewPassword(e.target.value)}
-                      placeholder="Nhập lại mật khẩu"
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-[#0B1528] border border-slate-700 text-xs font-semibold text-white focus:outline-none focus:border-cyan-400"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-1">
-                  <button
-                    type="submit"
-                    className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-bold text-xs shadow-md transition cursor-pointer"
-                  >
-                    Cập Nhật Mật Khẩu
-                  </button>
-                </div>
-              </form>
 
             </div>
           )}

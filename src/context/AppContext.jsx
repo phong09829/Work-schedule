@@ -33,6 +33,8 @@ import {
   CLOUD_STORAGE_KEYS
 } from '../utils/cloudSync';
 import { soundManager } from '../utils/audio';
+import { GOOGLE_CLIENT_ID } from '../config/authConfig';
+import { signOutGoogle } from '../utils/googleAuth';
 import {
   GOOGLE_STORAGE_KEYS,
   DEFAULT_CALENDAR_EVENTS,
@@ -100,7 +102,8 @@ export const AppProvider = ({ children }) => {
 
   // Google OAuth 2.0 & Sync States
   const [googleClientId, setGoogleClientId] = useState(() => {
-    return getStoredData(GOOGLE_STORAGE_KEYS.CLIENT_ID, '');
+    const saved = getStoredData(GOOGLE_STORAGE_KEYS.CLIENT_ID, '');
+    return (saved && saved !== 'ĐIỀN_CLIENT_ID_CỦA_BẠN_VÀO_ĐÂY') ? saved : GOOGLE_CLIENT_ID;
   });
 
   const [googleUser, setGoogleUser] = useState(() => {
@@ -523,6 +526,7 @@ export const AppProvider = ({ children }) => {
 
   // Logout current user
   const logoutAccount = useCallback(() => {
+    signOutGoogle();
     setCurrentUser(null);
     setCurrentUserState(null);
     setGoogleUser(null);
@@ -705,12 +709,91 @@ export const AppProvider = ({ children }) => {
         origin: { y: 0.6 }
       });
 
-      showToast(`🎉 Đã duyệt tài khoản Google "${cleanEmail}" thành công! Đang chuyển vào Schedule.`, 'success', 5000);
+      showToast(`🎉 Chào mừng ${displayName}! Bạn đã đăng nhập bằng Google thành công (${cleanEmail}).`, 'success', 5000);
       triggerCloudSync();
       return true;
     } catch (err) {
       console.error('Google quick login error:', err);
       showToast('Có lỗi khi đăng nhập tài khoản Google. Vui lòng thử lại!', 'error');
+      return false;
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  }, [showToast, triggerCloudSync, setActiveTab, registerAccount]);
+
+  // Handle Sign-In with Decoded Google User Profile (from GIS Credential JWT)
+  const loginWithDecodedGoogleUser = useCallback(async (decodedGoogleUser) => {
+    if (!decodedGoogleUser || !decodedGoogleUser.email) {
+      showToast('Không thể trích xuất thông tin tài khoản Google.', 'error');
+      return false;
+    }
+
+    setIsCloudSyncing(true);
+    try {
+      const cleanEmail = normalizeEmail(decodedGoogleUser.email);
+      const displayName = decodedGoogleUser.name || cleanEmail.split('@')[0];
+      const avatarUrl = decodedGoogleUser.picture || `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanEmail}`;
+
+      const googleProfile = {
+        id: decodedGoogleUser.id || `gusr-${Date.now()}`,
+        name: displayName,
+        email: cleanEmail,
+        picture: avatarUrl,
+        locale: decodedGoogleUser.locale || 'vi',
+        emailVerified: decodedGoogleUser.emailVerified ?? true,
+      };
+
+      setGoogleUser(googleProfile);
+      setStoredData(GOOGLE_STORAGE_KEYS.USER_PROFILE, googleProfile);
+
+      const activeSession = {
+        id: googleProfile.id,
+        name: displayName,
+        email: cleanEmail,
+        avatar: avatarUrl,
+        provider: 'google',
+      };
+
+      // Auto load or register in cloud
+      try {
+        const cloudRes = await loginCloudAccount({ email: cleanEmail, password: 'google_oauth_pass' });
+        if (cloudRes && cloudRes.ok && cloudRes.data) {
+          const data = cloudRes.data;
+          if (data.events && Array.isArray(data.events)) setEvents(data.events);
+          if (data.tasks && Array.isArray(data.tasks)) setTasks(data.tasks);
+          if (data.pomoSessions && Array.isArray(data.pomoSessions)) setPomoSessions(data.pomoSessions);
+          if (data.settings) setSettings(data.settings);
+        } else {
+          await registerAccount({
+            email: cleanEmail,
+            password: 'google_oauth_pass',
+            name: displayName,
+          });
+        }
+      } catch (cloudErr) {
+        console.warn('Cloud account load warning:', cloudErr);
+      }
+
+      setCurrentUser(activeSession);
+      setCurrentUserState(activeSession);
+      setCloudSyncStatus('synced');
+      setLastCloudSyncTime(new Date().toISOString());
+
+      // Switch straight to Schedule (Calendar)
+      setActiveTab('calendar');
+
+      confetti({
+        particleCount: 80,
+        spread: 70,
+        origin: { y: 0.6 }
+      });
+
+      showToast(`🎉 Chào mừng ${displayName}! Bạn đã đăng nhập bằng Google thành công (${cleanEmail}).`, 'success', 5000);
+      triggerCloudSync();
+      return true;
+    } catch (err) {
+      console.error('Google GIS login processing error:', err);
+      showToast('Có lỗi xảy ra khi xử lý thông tin Google. Vui lòng thử lại!', 'error');
       return false;
     } finally {
       setIsCloudSyncing(false);
@@ -1396,6 +1479,7 @@ export const AppProvider = ({ children }) => {
         isGoogleConnected,
         loginWithDirectGmail,
         loginWithGoogleAccount,
+        loginWithDecodedGoogleUser,
         handleGoogleLoginSuccess,
         // Pomodoro & Settings
         pomoSessions,
