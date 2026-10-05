@@ -13,12 +13,9 @@ import {
   setCurrentUser,
   clearAllRegisteredAccounts,
   deleteUserAccount,
+  getRegisteredUsers
 } from '../utils/storage';
 import { 
-  registerCloudAccount, 
-  loginCloudAccount, 
-  changeCloudPassword,
-  resetCloudAccountPassword,
   pushUserDataToCloud, 
   pullUserDataFromCloud,
   generateQuickSyncToken,
@@ -337,193 +334,7 @@ export const AppProvider = ({ children }) => {
     };
   }, [currentUser?.email]);
 
-  // --- Multi-Account Authentication Handlers ---
-
-  // Register with Gmail + Password (Accessible from ANY phone or computer)
-  const registerAccount = useCallback(async ({ email, password, name }) => {
-    setIsCloudSyncing(true);
-    try {
-      const res = await registerCloudAccount({
-        email,
-        password,
-        name,
-        initialData: {
-          tasks,
-          events,
-          pomoSessions,
-          settings,
-        }
-      });
-
-      if (!res.ok) {
-        showToast(res.message, 'error');
-        return res;
-      }
-
-      const newUser = res.user;
-      setCurrentUserState(newUser);
-
-      // Save to local user cache
-      setUserData(newUser.email, 'events', events);
-      setUserData(newUser.email, 'tasks', tasks);
-      setUserData(newUser.email, 'pomo_sessions', pomoSessions);
-      setUserData(newUser.email, 'settings', settings);
-
-      setCloudSyncStatus('synced');
-      setLastCloudSyncTime(new Date().toISOString());
-
-      showToast(`Đăng ký thành công! Bạn có thể đăng nhập Gmail "${newUser.email}" trên bất kỳ điện thoại hoặc máy tính nào.`, 'success', 5000);
-      return res;
-    } catch (err) {
-      console.error('Register account error:', err);
-      showToast('Có lỗi xảy ra khi tạo tài khoản. Vui lòng thử lại!', 'error');
-      return { ok: false, message: err.message };
-    } finally {
-      setIsCloudSyncing(false);
-    }
-  }, [events, tasks, pomoSessions, settings, showToast]);
-
-  // Login with Gmail + Password (Downloads user cloud data automatically or auto-registers on first login)
-  const loginAccount = useCallback(async ({ email, password, name = null }) => {
-    setIsCloudSyncing(true);
-    try {
-      let res = await loginCloudAccount({ email, password });
-      
-      // If user has not registered this Gmail yet, automatically register and sign them in smoothly!
-      if (!res.ok && (res.errorType === 'USER_NOT_FOUND' || res.message?.includes('chưa được đăng ký'))) {
-        const autoReg = await registerCloudAccount({
-          email,
-          password,
-          name: name || email.split('@')[0],
-          initialData: {
-            tasks,
-            events,
-            pomoSessions,
-            settings,
-          }
-        });
-        if (autoReg.ok) {
-          res = autoReg;
-        }
-      }
-
-      if (!res.ok) {
-        showToast(res.message, 'error');
-        return res;
-      }
-
-      const user = res.user;
-      const data = res.data || {};
-
-      setCurrentUserState(user);
-
-      // Load all data specific to this account
-      const userEvents = data.events || DEFAULT_CALENDAR_EVENTS;
-      const userTasks = data.tasks || DEFAULT_TASKS;
-      const userPomo = data.pomoSessions || generateInitialPomoSessions();
-      const userSettings = data.settings || DEFAULT_SETTINGS;
-
-      setEvents(userEvents);
-      setTasks(userTasks);
-      setPomoSessions(userPomo);
-      setSettings(userSettings);
-
-      // Cache locally
-      setUserData(user.email, 'events', userEvents);
-      setUserData(user.email, 'tasks', userTasks);
-      setUserData(user.email, 'pomo_sessions', userPomo);
-      setUserData(user.email, 'settings', userSettings);
-
-      setCloudSyncStatus('synced');
-      setLastCloudSyncTime(new Date().toISOString());
-
-      // Navigate straight to Schedule (Calendar)
-      setActiveTab('calendar');
-
-      confetti({
-        particleCount: 70,
-        spread: 60,
-        origin: { y: 0.6 }
-      });
-
-      showToast(`🎉 Đăng nhập thành công! Chào mừng ${user.name || user.email} vào tài khoản Schedule.`, 'success', 4000);
-      return res;
-    } catch (err) {
-      console.error('Login account error:', err);
-      showToast('Lỗi kết nối khi đăng nhập. Vui lòng thử lại!', 'error');
-      return { ok: false, message: err.message };
-    } finally {
-      setIsCloudSyncing(false);
-    }
-  }, [events, tasks, pomoSessions, settings, showToast, setActiveTab]);
-
-  // Reset Password for any Gmail
-  const resetAccountPassword = useCallback(async ({ email, newPassword }) => {
-    setIsCloudSyncing(true);
-    try {
-      const res = await resetCloudAccountPassword({ email, newPassword });
-      if (!res.ok) {
-        showToast(res.message, 'error');
-        return res;
-      }
-
-      const user = res.user;
-      const data = res.data;
-
-      setCurrentUserState(user);
-
-      const userEvents = data.events || DEFAULT_CALENDAR_EVENTS;
-      const userTasks = data.tasks || DEFAULT_TASKS;
-      const userPomo = data.pomoSessions || generateInitialPomoSessions();
-      const userSettings = data.settings || DEFAULT_SETTINGS;
-
-      setEvents(userEvents);
-      setTasks(userTasks);
-      setPomoSessions(userPomo);
-      setSettings(userSettings);
-
-      setCloudSyncStatus('synced');
-      setLastCloudSyncTime(new Date().toISOString());
-
-      showToast(res.message, 'success', 4000);
-      return res;
-    } catch (err) {
-      console.error('Reset password error:', err);
-      showToast('Không thể đặt lại mật khẩu. Vui lòng thử lại!', 'error');
-      return { ok: false, message: err.message };
-    } finally {
-      setIsCloudSyncing(false);
-    }
-  }, [showToast]);
-
-  // Change Password for current Gmail in Cloud
-  const changeAccountPassword = useCallback(async ({ oldPassword, newPassword }) => {
-    if (!currentUser || !currentUser.email) {
-      showToast('Vui lòng đăng nhập tài khoản trước khi đổi mật khẩu!', 'warning');
-      return { ok: false, message: 'Chưa đăng nhập' };
-    }
-
-    try {
-      const res = await changeCloudPassword({
-        email: currentUser.email,
-        oldPassword,
-        newPassword,
-      });
-
-      if (res.ok) {
-        if (res.user) {
-          setCurrentUserState(res.user);
-        }
-        showToast('Đổi mật khẩu thành công! Mật khẩu mới đã được đồng bộ an toàn.', 'success', 4000);
-      } else {
-        showToast(res.message, 'error');
-      }
-      return res;
-    } catch (err) {
-      showToast('Không thể cập nhật mật khẩu.', 'error');
-      return { ok: false, message: err.message };
-    }
-  }, [currentUser, showToast]);
+  // --- Passwordless OTP Multi-Account Handlers (Mỗi Gmail là 1 tài khoản riêng biệt) ---
 
   // Logout current user
   const logoutAccount = useCallback(() => {
@@ -535,7 +346,11 @@ export const AppProvider = ({ children }) => {
     setGoogleToken(null);
     setLastSyncTime(null);
     setCloudSyncStatus('idle');
-    showToast('Đã đăng xuất tài khoản. Bạn có thể đăng nhập lại bất cứ lúc nào.', 'info');
+    setTasks(DEFAULT_TASKS);
+    setEvents(DEFAULT_CALENDAR_EVENTS);
+    setPomoSessions(generateInitialPomoSessions());
+    setSettings(DEFAULT_SETTINGS);
+    showToast('Đã đăng xuất tài khoản. Bạn có thể đăng nhập lại bằng mã OTP bất cứ lúc nào.', 'info');
   }, [showToast]);
 
   // Delete a specific account from Cloud and Local
@@ -599,11 +414,12 @@ export const AppProvider = ({ children }) => {
       return false;
     }
 
+    const cleanEmail = normalizeEmail(parsed.email);
     const sessionUser = {
       id: `usr-${Date.now()}`,
-      email: parsed.email,
-      name: parsed.name || parsed.email.split('@')[0],
-      passwordHash: parsed.passwordHash,
+      email: cleanEmail,
+      name: parsed.name || cleanEmail.split('@')[0],
+      provider: 'device_sync',
     };
 
     setCurrentUser(sessionUser);
@@ -612,41 +428,26 @@ export const AppProvider = ({ children }) => {
     if (parsed.data) {
       if (Array.isArray(parsed.data.tasks)) {
         setTasks(parsed.data.tasks);
-        setUserData(parsed.email, 'tasks', parsed.data.tasks);
+        setUserData(cleanEmail, 'tasks', parsed.data.tasks);
       }
       if (Array.isArray(parsed.data.events)) {
         setEvents(parsed.data.events);
-        setUserData(parsed.email, 'events', parsed.data.events);
+        setUserData(cleanEmail, 'events', parsed.data.events);
       }
       if (Array.isArray(parsed.data.pomoSessions)) {
         setPomoSessions(parsed.data.pomoSessions);
-        setUserData(parsed.email, 'pomo_sessions', parsed.data.pomoSessions);
+        setUserData(cleanEmail, 'pomo_sessions', parsed.data.pomoSessions);
       }
       if (parsed.data.settings) {
         setSettings(parsed.data.settings);
-        setUserData(parsed.email, 'settings', parsed.data.settings);
+        setUserData(cleanEmail, 'settings', parsed.data.settings);
       }
     }
 
-    showToast(`Đã liên kết thiết bị với tài khoản ${parsed.email}! Dữ liệu đã đồng bộ hoàn tất.`, 'success');
+    showToast(`Đã liên kết thiết bị với tài khoản ${cleanEmail}! Dữ liệu đã đồng bộ hoàn tất.`, 'success');
     await syncWithCloud(true);
     return true;
   }, [syncWithCloud, showToast]);
-
-  // Legacy direct login fallback
-  const loginWithDirectGmail = useCallback(async (email, customName = null) => {
-    if (!email || !email.includes('@')) {
-      showToast('Vui lòng nhập địa chỉ email hợp lệ!', 'warning');
-      return false;
-    }
-    const cleanEmail = normalizeEmail(email);
-    const res = await registerAccount({
-      email: cleanEmail,
-      password: 'password123',
-      name: customName,
-    });
-    return res.ok;
-  }, [registerAccount, showToast]);
 
   // Direct Google Account Login (Authenticates Gmail with zero Google 401 errors, auto-syncs cloud data, and navigates straight to Schedule)
   const loginWithGoogleAccount = useCallback(async (googleEmail, googleName = null) => {
@@ -677,25 +478,16 @@ export const AppProvider = ({ children }) => {
         provider: 'google',
       };
 
-      // Auto load or register in cloud
-      try {
-        const cloudRes = await loginCloudAccount({ email: cleanEmail, password: 'google_oauth_pass' });
-        if (cloudRes && cloudRes.ok && cloudRes.data) {
-          const data = cloudRes.data;
-          if (data.events && Array.isArray(data.events)) setEvents(data.events);
-          if (data.tasks && Array.isArray(data.tasks)) setTasks(data.tasks);
-          if (data.pomoSessions && Array.isArray(data.pomoSessions)) setPomoSessions(data.pomoSessions);
-          if (data.settings) setSettings(data.settings);
-        } else {
-          await registerAccount({
-            email: cleanEmail,
-            password: 'google_oauth_pass',
-            name: displayName,
-          });
-        }
-      } catch (cloudErr) {
-        console.warn('Cloud account load warning:', cloudErr);
-      }
+      // Load user-specific isolated dataset
+      const userTasks = getUserData(cleanEmail, 'tasks', null);
+      const userEvents = getUserData(cleanEmail, 'events', null);
+      const userPomo = getUserData(cleanEmail, 'pomo_sessions', null);
+      const userSettings = getUserData(cleanEmail, 'settings', null);
+
+      setTasks(userTasks && Array.isArray(userTasks) ? userTasks : DEFAULT_TASKS);
+      setEvents(userEvents && Array.isArray(userEvents) ? userEvents : DEFAULT_CALENDAR_EVENTS);
+      setPomoSessions(userPomo && Array.isArray(userPomo) ? userPomo : generateInitialPomoSessions());
+      setSettings(userSettings || DEFAULT_SETTINGS);
 
       setCurrentUser(activeSession);
       setCurrentUserState(activeSession);
@@ -721,7 +513,7 @@ export const AppProvider = ({ children }) => {
     } finally {
       setIsCloudSyncing(false);
     }
-  }, [showToast, triggerCloudSync, setActiveTab, registerAccount]);
+  }, [showToast, triggerCloudSync, setActiveTab]);
 
   // Handle Sign-In with Decoded Google User Profile (from GIS Credential JWT)
   const loginWithDecodedGoogleUser = useCallback(async (decodedGoogleUser) => {
@@ -756,25 +548,16 @@ export const AppProvider = ({ children }) => {
         provider: 'google',
       };
 
-      // Auto load or register in cloud
-      try {
-        const cloudRes = await loginCloudAccount({ email: cleanEmail, password: 'google_oauth_pass' });
-        if (cloudRes && cloudRes.ok && cloudRes.data) {
-          const data = cloudRes.data;
-          if (data.events && Array.isArray(data.events)) setEvents(data.events);
-          if (data.tasks && Array.isArray(data.tasks)) setTasks(data.tasks);
-          if (data.pomoSessions && Array.isArray(data.pomoSessions)) setPomoSessions(data.pomoSessions);
-          if (data.settings) setSettings(data.settings);
-        } else {
-          await registerAccount({
-            email: cleanEmail,
-            password: 'google_oauth_pass',
-            name: displayName,
-          });
-        }
-      } catch (cloudErr) {
-        console.warn('Cloud account load warning:', cloudErr);
-      }
+      // Load user-specific isolated dataset
+      const userTasks = getUserData(cleanEmail, 'tasks', null);
+      const userEvents = getUserData(cleanEmail, 'events', null);
+      const userPomo = getUserData(cleanEmail, 'pomo_sessions', null);
+      const userSettings = getUserData(cleanEmail, 'settings', null);
+
+      setTasks(userTasks && Array.isArray(userTasks) ? userTasks : DEFAULT_TASKS);
+      setEvents(userEvents && Array.isArray(userEvents) ? userEvents : DEFAULT_CALENDAR_EVENTS);
+      setPomoSessions(userPomo && Array.isArray(userPomo) ? userPomo : generateInitialPomoSessions());
+      setSettings(userSettings || DEFAULT_SETTINGS);
 
       setCurrentUser(activeSession);
       setCurrentUserState(activeSession);
@@ -800,9 +583,9 @@ export const AppProvider = ({ children }) => {
     } finally {
       setIsCloudSyncing(false);
     }
-  }, [showToast, triggerCloudSync, setActiveTab, registerAccount]);
+  }, [showToast, triggerCloudSync, setActiveTab]);
 
-  // Handle Sign-In with Email OTP Session & JWT
+  // Handle Sign-In with Email OTP Session & JWT (Mỗi Gmail là 1 tài khoản riêng biệt 100%)
   const loginWithOtpSession = useCallback(async (jwtToken, userPayload) => {
     if (!userPayload || !userPayload.email) {
       showToast('Thông tin người dùng không hợp lệ.', 'error');
@@ -826,16 +609,22 @@ export const AppProvider = ({ children }) => {
 
       saveOtpSession(jwtToken, activeSession);
 
-      // Hydrate user data from local storage or cloud account
+      // Tải dữ liệu riêng biệt của Gmail này (100% độc lập, không dùng chung với bất kỳ Gmail nào khác)
       const userTasks = getUserData(cleanEmail, 'tasks', null);
       const userEvents = getUserData(cleanEmail, 'events', null);
       const userPomo = getUserData(cleanEmail, 'pomo_sessions', null);
       const userSettings = getUserData(cleanEmail, 'settings', null);
 
-      if (userTasks && Array.isArray(userTasks)) setTasks(userTasks);
-      if (userEvents && Array.isArray(userEvents)) setEvents(userEvents);
-      if (userPomo && Array.isArray(userPomo)) setPomoSessions(userPomo);
-      if (userSettings) setSettings(userSettings);
+      setTasks(userTasks && Array.isArray(userTasks) ? userTasks : DEFAULT_TASKS);
+      setEvents(userEvents && Array.isArray(userEvents) ? userEvents : DEFAULT_CALENDAR_EVENTS);
+      setPomoSessions(userPomo && Array.isArray(userPomo) ? userPomo : generateInitialPomoSessions());
+      setSettings(userSettings || DEFAULT_SETTINGS);
+
+      // Khởi tạo lưu trữ riêng nếu là tài khoản mới đăng nhập lần đầu
+      if (!userTasks) setUserData(cleanEmail, 'tasks', DEFAULT_TASKS);
+      if (!userEvents) setUserData(cleanEmail, 'events', DEFAULT_CALENDAR_EVENTS);
+      if (!userPomo) setUserData(cleanEmail, 'pomo_sessions', generateInitialPomoSessions());
+      if (!userSettings) setUserData(cleanEmail, 'settings', DEFAULT_SETTINGS);
 
       setCurrentUser(activeSession);
       setCurrentUserState(activeSession);
@@ -1495,10 +1284,6 @@ export const AppProvider = ({ children }) => {
         // Current User Account & Cloud Auth
         currentUser,
         isAccountLoggedIn,
-        registerAccount,
-        loginAccount,
-        resetAccountPassword,
-        changeAccountPassword,
         logoutAccount,
         deleteAccount,
         clearAllAccounts,
@@ -1531,7 +1316,7 @@ export const AppProvider = ({ children }) => {
         syncWithGoogleCalendar,
         isGoogleSyncing,
         lastSyncTime,
-        // OTP & Auth
+        // OTP & Auth (Passwordless Email OTP)
         loginWithOtpSession,
         // Google OAuth & GIS
         googleUser,
@@ -1539,7 +1324,6 @@ export const AppProvider = ({ children }) => {
         googleClientId,
         setGoogleClientId,
         isGoogleConnected,
-        loginWithDirectGmail,
         loginWithGoogleAccount,
         loginWithDecodedGoogleUser,
         handleGoogleLoginSuccess,

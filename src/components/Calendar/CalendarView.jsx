@@ -148,7 +148,7 @@ export const CalendarView = () => {
                 ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20'
                 : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
             }`}
-            title="Quản lý tài khoản và mật khẩu"
+            title={isAccountLoggedIn ? `Tài khoản OTP: ${currentUser?.email}` : 'Quản lý tài khoản OTP'}
           >
             {isAccountLoggedIn ? (
               <>

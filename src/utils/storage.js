@@ -1,8 +1,8 @@
-// LocalStorage management, multi-account authentication, and isolated user data storage
+// LocalStorage management, passwordless OTP multi-account authentication, and isolated user data storage
 
 const STORAGE_KEYS = {
-  USERS: 'focusflow_registered_users_v2',
-  CURRENT_USER: 'focusflow_current_user_v2',
+  USERS: 'focusflow_registered_users_v3',
+  CURRENT_USER: 'focusflow_current_user_v3',
   TASKS: 'focusflow_tasks_v1',
   POMO_SESSIONS: 'focusflow_pomo_sessions_v1',
   SETTINGS: 'focusflow_settings_v1',
@@ -129,70 +129,21 @@ export const setStoredData = (key, value) => {
   }
 };
 
-// --- Multi-Account & User-Specific Storage Utilities ---
+// --- Multi-Account & User-Specific Storage Utilities (Mỗi Gmail là một tài khoản độc lập) ---
 
 export const normalizeEmail = (email) => {
   if (!email || typeof email !== 'string') return '';
   return email.trim().toLowerCase();
 };
 
+/**
+ * Mỗi Gmail có bộ key lưu trữ riêng biệt, không bao giờ dùng chung
+ */
 export const getUserStorageKey = (email, dataType) => {
   const cleanEmail = normalizeEmail(email) || 'guest';
   const safeEmail = cleanEmail.replace(/[^a-z0-9@._-]/g, '_');
-  return `focusflow_u_${safeEmail}_${dataType}_v2`;
+  return `focusflow_u_${safeEmail}_${dataType}_v3`;
 };
-
-// Auto-purge all previous accounts to ensure completely clean slate as requested
-const autoPurgeHistoricalAccounts = () => {
-  if (typeof window === 'undefined' || !window.localStorage) return;
-  try {
-    const PURGE_FLAG = 'focusflow_auto_purged_v3_clean';
-    if (!localStorage.getItem(PURGE_FLAG)) {
-      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-      localStorage.removeItem(STORAGE_KEYS.USERS);
-
-      const legacyKeys = [
-        'focusflow_registered_users_v2',
-        'focusflow_registered_users_v1',
-        'focusflow_users_v1',
-        'focusflow_users',
-        'focusflow_current_user_v2',
-        'focusflow_current_user_v1',
-        'focusflow_current_user',
-        'focusflow_user_profile_v1',
-        'focusflow_google_user_v1',
-        'focusflow_cloud_cached_users_v2',
-        'focusflow_cloud_cached_users_v1',
-        'focusflow_last_cloud_sync_time_v1',
-        'focusflow_cloud_last_sync_v2'
-      ];
-      legacyKeys.forEach(k => {
-        try { localStorage.removeItem(k); } catch (_) {}
-      });
-
-      const keysInStorage = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k) keysInStorage.push(k);
-      }
-      keysInStorage.forEach(k => {
-        if (
-          k.startsWith('focusflow_u_') ||
-          k.startsWith('cloud_cache_') ||
-          k.startsWith('focusflow_google_')
-        ) {
-          try { localStorage.removeItem(k); } catch (_) {}
-        }
-      });
-
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify([]));
-      localStorage.setItem(PURGE_FLAG, 'true');
-    }
-  } catch (_) {}
-};
-
-// Execute immediately upon load
-autoPurgeHistoricalAccounts();
 
 // Retrieve registered user list
 export const getRegisteredUsers = () => {
@@ -236,164 +187,37 @@ export const setCurrentUser = (user) => {
   }
 };
 
-// Register a new user account with unique password per Gmail
-export const registerUserAccount = ({ email, password, name }) => {
+/**
+ * Lưu hoặc cập nhật thông tin tài khoản Gmail sau khi xác thực OTP thành công
+ * (Hoàn toàn không cần mật khẩu)
+ */
+export const saveUserAccount = ({ email, name, avatar = null, provider = 'email_otp' }) => {
   const cleanEmail = normalizeEmail(email);
   if (!cleanEmail || !cleanEmail.includes('@')) {
-    return { ok: false, message: 'Địa chỉ Gmail không hợp lệ! Vui lòng kiểm tra lại.' };
-  }
-  if (!password || password.trim().length < 4) {
-    return { ok: false, message: 'Mật khẩu phải có ít nhất 4 ký tự!' };
+    return { ok: false, message: 'Địa chỉ Gmail không hợp lệ!' };
   }
 
   const existing = findUserByEmail(cleanEmail);
-  if (existing && (existing.password || existing.passwordHash)) {
-    return { 
-      ok: false, 
-      errorType: 'EMAIL_EXISTS',
-      message: `Tài khoản Gmail "${cleanEmail}" đã được tạo trước đó! Bạn có thể đăng nhập hoặc đặt lại mật khẩu.` 
-    };
-  }
-
   const displayName = name && name.trim()
     ? name.trim()
     : (existing?.name || cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()));
 
-  const newUser = {
+  const userAccount = {
     id: existing?.id || `usr-${Date.now()}`,
     email: cleanEmail,
     name: displayName,
-    password: password.trim(),
-    avatar: existing?.avatar || null,
+    avatar: avatar || existing?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanEmail}`,
+    provider,
     createdAt: existing?.createdAt || new Date().toISOString(),
     lastLogin: new Date().toISOString(),
   };
 
   const users = getRegisteredUsers().filter(u => normalizeEmail(u.email) !== cleanEmail);
-  users.push(newUser);
+  users.push(userAccount);
   saveRegisteredUsers(users);
+  setCurrentUser(userAccount);
 
-  // Set active session
-  const sessionUser = {
-    id: newUser.id,
-    email: newUser.email,
-    name: newUser.name,
-    avatar: newUser.avatar,
-    createdAt: newUser.createdAt,
-  };
-  setCurrentUser(sessionUser);
-
-  return { ok: true, user: sessionUser };
-};
-
-// Log in an existing user with Gmail + Password
-export const loginUserAccount = ({ email, password }) => {
-  const cleanEmail = normalizeEmail(email);
-  if (!cleanEmail) {
-    return { ok: false, message: 'Vui lòng nhập địa chỉ Gmail!' };
-  }
-
-  const user = findUserByEmail(cleanEmail);
-  if (!user || (!user.password && !user.passwordHash)) {
-    return { 
-      ok: false, 
-      errorType: 'USER_NOT_FOUND',
-      message: `Tài khoản Gmail "${cleanEmail}" chưa được đăng ký mật khẩu trên thiết bị này. Vui lòng chuyển sang tab "Đăng Ký Mới"!` 
-    };
-  }
-
-  if (user.password && user.password !== password?.trim()) {
-    return { 
-      ok: false, 
-      errorType: 'WRONG_PASSWORD',
-      message: 'Mật khẩu không chính xác! Mỗi tài khoản Gmail chỉ có duy nhất 1 mật khẩu trên mọi thiết bị. Vui lòng kiểm tra lại.' 
-    };
-  }
-
-  // Update last login
-  const users = getRegisteredUsers();
-  const updatedUsers = users.map(u => {
-    if (normalizeEmail(u.email) === cleanEmail) {
-      return { ...u, lastLogin: new Date().toISOString() };
-    }
-    return u;
-  });
-  saveRegisteredUsers(updatedUsers);
-
-  const sessionUser = {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    avatar: user.avatar,
-    createdAt: user.createdAt,
-  };
-  setCurrentUser(sessionUser);
-
-  return { ok: true, user: sessionUser };
-};
-
-// Reset password for a Gmail account
-export const resetUserPassword = ({ email, newPassword }) => {
-  const cleanEmail = normalizeEmail(email);
-  if (!cleanEmail || !cleanEmail.includes('@')) {
-    return { ok: false, message: 'Địa chỉ Gmail không hợp lệ!' };
-  }
-  if (!newPassword || newPassword.trim().length < 4) {
-    return { ok: false, message: 'Mật khẩu mới phải có ít nhất 4 ký tự!' };
-  }
-
-  const users = getRegisteredUsers();
-  let user = users.find(u => normalizeEmail(u.email) === cleanEmail);
-
-  if (!user) {
-    // Create user if not found
-    user = {
-      id: `usr-${Date.now()}`,
-      email: cleanEmail,
-      name: cleanEmail.split('@')[0],
-      password: newPassword.trim(),
-      avatar: null,
-      createdAt: new Date().toISOString(),
-      lastLogin: new Date().toISOString(),
-    };
-    users.push(user);
-  } else {
-    user.password = newPassword.trim();
-    user.lastLogin = new Date().toISOString();
-  }
-
-  const updatedUsers = users.map(u => normalizeEmail(u.email) === cleanEmail ? { ...u, password: newPassword.trim() } : u);
-  saveRegisteredUsers(updatedUsers);
-
-  const sessionUser = {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    avatar: user.avatar,
-    createdAt: user.createdAt,
-  };
-  setCurrentUser(sessionUser);
-
-  return { ok: true, user: sessionUser, message: 'Đã đặt lại mật khẩu thành công!' };
-};
-
-// Change account password for a Gmail
-export const changeUserPassword = ({ email, oldPassword, newPassword }) => {
-  const cleanEmail = normalizeEmail(email);
-  const user = findUserByEmail(cleanEmail);
-  if (!user) {
-    return { ok: false, message: 'Không tìm thấy thông tin tài khoản!' };
-  }
-
-  if (user.password && user.password !== oldPassword?.trim()) {
-    return { ok: false, message: 'Mật khẩu hiện tại không chính xác!' };
-  }
-
-  if (!newPassword || newPassword.trim().length < 4) {
-    return { ok: false, message: 'Mật khẩu mới phải có ít nhất 4 ký tự!' };
-  }
-
-  return resetUserPassword({ email: cleanEmail, newPassword });
+  return { ok: true, user: userAccount };
 };
 
 // Delete a specific user account from local storage
@@ -409,7 +233,7 @@ export const deleteUserAccount = (email) => {
     setCurrentUser(null);
   }
 
-  // Remove isolated data keys
+  // Remove isolated data keys for this specific email
   try {
     localStorage.removeItem(getUserStorageKey(cleanEmail, 'tasks'));
     localStorage.removeItem(getUserStorageKey(cleanEmail, 'events'));
@@ -427,27 +251,7 @@ export const clearAllRegisteredAccounts = () => {
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
     localStorage.removeItem(STORAGE_KEYS.USERS);
 
-    // 2. Remove all legacy user keys
-    const keysToRemove = [
-      'focusflow_registered_users_v2',
-      'focusflow_registered_users_v1',
-      'focusflow_users_v1',
-      'focusflow_users',
-      'focusflow_current_user_v2',
-      'focusflow_current_user_v1',
-      'focusflow_current_user',
-      'focusflow_user_profile_v1',
-      'focusflow_google_user_v1',
-      'focusflow_cloud_cached_users_v2',
-      'focusflow_cloud_cached_users_v1',
-      'focusflow_last_cloud_sync_time_v1',
-      'focusflow_cloud_last_sync_v2'
-    ];
-    keysToRemove.forEach(k => {
-      try { localStorage.removeItem(k); } catch (_) {}
-    });
-
-    // 3. Scan & remove all user-specific data keys and cloud caches
+    // 2. Scan & remove all user-specific data keys and cloud caches
     const keysInStorage = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
@@ -464,7 +268,7 @@ export const clearAllRegisteredAccounts = () => {
       }
     });
 
-    // 4. Save empty registered users list
+    // 3. Save empty registered users list
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify([]));
     return true;
   } catch (err) {
@@ -473,13 +277,15 @@ export const clearAllRegisteredAccounts = () => {
   }
 };
 
-// User-specific data helper functions
+// User-specific data helper functions (100% riêng biệt từng Gmail)
 export const getUserData = (email, dataType, fallback) => {
+  if (!email) return fallback;
   const key = getUserStorageKey(email, dataType);
   return getStoredData(key, fallback);
 };
 
 export const setUserData = (email, dataType, value) => {
+  if (!email) return;
   const key = getUserStorageKey(email, dataType);
   setStoredData(key, value);
 };
