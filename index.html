@@ -4110,15 +4110,21 @@
                 {step === 'EMAIL' ? (
                   <form onSubmit={handleSendOtp} className="space-y-3 pt-1">
                     <div>
-                      <label className="block text-xs font-bold text-slate-300 mb-1">Địa chỉ Email</label>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-xs font-bold text-slate-300">Địa chỉ Gmail / Email đăng nhập</label>
+                        <span className="text-[10px] text-emerald-400 font-semibold">Bất kỳ Gmail nào</span>
+                      </div>
                       <input
                         type="email"
                         required
-                        placeholder="ví dụ: phong09829@gmail.com"
+                        placeholder="nhap_email_cua_ban@gmail.com"
                         value={email}
                         onChange={e => setEmail(e.target.value)}
                         className="w-full px-4 py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-sm font-semibold outline-none focus:border-indigo-500"
                       />
+                      <p className="text-[11px] text-slate-400 mt-1.5 leading-tight">
+                        💡 Bạn có thể nhập <strong>bất kỳ Gmail nào</strong>. Mã OTP 6 số sẽ được gửi về hộp thư đó.
+                      </p>
                     </div>
                     <button
                       type="submit"
@@ -4185,6 +4191,10 @@
                         );
                       })}
                     </div>
+
+                    <p className="text-[11px] text-center text-slate-400 pt-0.5">
+                      📬 Nếu không thấy mã trong Hộp thư đến, vui lòng kiểm tra thêm mục <strong>Thư rác (Spam)</strong> hoặc <strong>Quảng cáo</strong>.
+                    </p>
 
                     <button
                       onClick={() => handleVerifyOtp()}

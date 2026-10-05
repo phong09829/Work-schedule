@@ -357,20 +357,23 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
               <form onSubmit={handleSendOtp} className="space-y-4">
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                    <span>Địa chỉ Email nhận mã</span>
-                    <span className="text-[10px] text-slate-400 font-normal">Gmail / Outlook / Công ty</span>
+                    <span>Địa chỉ Gmail / Email đăng nhập</span>
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Bất kỳ Gmail nào</span>
                   </label>
                   <div className="relative">
                     <Mail className="w-4 h-4 absolute left-3.5 top-3.5 text-slate-400" />
                     <input
                       type="email"
                       required
-                      placeholder="ví dụ: phong09829@gmail.com"
+                      placeholder="nhap_email_cua_ban@gmail.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full pl-10 pr-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-sm font-semibold focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition text-slate-900 dark:text-slate-100"
                     />
                   </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+                    💡 Bạn có thể nhập <strong>bất kỳ Gmail nào</strong>. Mã OTP 6 số sẽ được gửi trực tiếp về email đó.
+                  </p>
                 </div>
 
                 <button
@@ -536,6 +539,10 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
                       );
                     })}
                   </div>
+
+                  <p className="text-[11px] text-center text-slate-500 dark:text-slate-400 pt-0.5">
+                    📬 Nếu không thấy mã trong Hộp thư đến, vui lòng kiểm tra mục <strong>Thư rác (Spam)</strong> hoặc <strong>Quảng cáo</strong>.
+                  </p>
                 </div>
 
                 {/* Confirm Button */}
