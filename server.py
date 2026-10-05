@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-FocusFlow - Standalone Python OTP Authentication Server
-======================================================
-Hỗ trợ gửi mã OTP 6 chữ số qua Gmail SMTP và xác thực phiên đăng nhập (Zero-dependency).
+FocusFlow - Unified Web & OTP Authentication Server
+===================================================
+Tự động phục vụ giao diện Web (index.html) và cung cấp API gửi/xác thực OTP qua Gmail SMTP.
 Chạy bằng lệnh: python server.py
 """
 
@@ -26,9 +26,11 @@ EMAIL_APP_PASSWORD = os.environ.get("EMAIL_APP_PASSWORD", "").replace(" ", "")
 # In-Memory OTP Store: { email: { "code": "123456", "expires_at": timestamp, "attempts": 0, "created_at": timestamp } }
 OTP_STORE = {}
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def load_env_file():
     global EMAIL_USER, EMAIL_APP_PASSWORD, PORT
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    env_path = os.path.join(BASE_DIR, ".env")
     if os.path.exists(env_path):
         with open(env_path, "r", encoding="utf-8") as f:
             for line in f:
@@ -45,6 +47,26 @@ def load_env_file():
                             PORT = int(v)
                         except ValueError:
                             pass
+
+def save_env_file(user, app_password):
+    global EMAIL_USER, EMAIL_APP_PASSWORD
+    EMAIL_USER = user.strip().lower()
+    EMAIL_APP_PASSWORD = app_password.replace(" ", "")
+    
+    env_path = os.path.join(BASE_DIR, ".env")
+    env_content = f"""# =========================================================================================
+# 🔐 CẤU HÌNH BIẾN MÔI TRƯỜNG ĐĂNG NHẬP OTP QUA EMAIL (GMAIL SMTP)
+# =========================================================================================
+
+PORT={PORT}
+EMAIL_USER={EMAIL_USER}
+EMAIL_APP_PASSWORD={EMAIL_APP_PASSWORD}
+JWT_SECRET=focusflow_super_secret_jwt_key_2026
+CLIENT_URL=http://localhost:5173
+"""
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.write(env_content)
+    print(f"[Config] Đã cập nhật cấu hình Gmail SMTP: {EMAIL_USER}")
 
 load_env_file()
 
@@ -112,7 +134,10 @@ def send_smtp_email(to_email, otp_code):
         return False, str(e)
 
 
-class AuthHandler(http.server.BaseHTTPRequestHandler):
+class UnifiedHandler(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=BASE_DIR, **kwargs)
+
     def _send_cors_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -136,12 +161,17 @@ class AuthHandler(http.server.BaseHTTPRequestHandler):
             is_configured = bool(EMAIL_USER and EMAIL_APP_PASSWORD and EMAIL_USER != "your_email@gmail.com")
             self._send_json(200, {
                 "status": "ok",
-                "server": "FocusFlow Python OTP Server",
+                "server": "FocusFlow Python OTP & Web Server",
                 "emailConfigured": is_configured,
                 "emailUser": re.sub(r"(.{2})(.*)(@.*)", r"\1***\3", EMAIL_USER) if is_configured else "Chưa cấu hình"
             })
+        elif parsed.path.startswith("/api/"):
+            self._send_json(404, {"error": "API endpoint not found"})
         else:
-            self._send_json(404, {"error": "Endpoint not found"})
+            # Phục vụ static files (index.html, src, etc.)
+            if parsed.path == "/" or parsed.path == "":
+                self.path = "/index.html"
+            super().do_GET()
 
     def do_POST(self):
         parsed = urlparse(self.path)
@@ -246,17 +276,34 @@ class AuthHandler(http.server.BaseHTTPRequestHandler):
                 }
             })
 
+        elif parsed.path == "/api/auth/save-smtp-config":
+            user = (body.get("emailUser") or "").strip().lower()
+            pwd = (body.get("emailAppPassword") or "").replace(" ", "")
+
+            if not is_valid_email(user):
+                return self._send_json(400, {"ok": False, "message": "Địa chỉ Gmail không hợp lệ!"})
+            if len(pwd) < 8:
+                return self._send_json(400, {"ok": False, "message": "Mật khẩu ứng dụng phải có 16 chữ cái!"})
+
+            save_env_file(user, pwd)
+            return self._send_json(200, {
+                "ok": True,
+                "message": f"Đã lưu và kích hoạt cấu hình Gmail SMTP cho '{user}' thành công!"
+            })
+
         else:
             self._send_json(404, {"error": "Endpoint not found"})
 
 
 def run():
-    with socketserver.TCPServer(("", PORT), AuthHandler) as httpd:
-        print("=======================================================")
-        print(f"🚀 FocusFlow Python OTP Auth Server đang chạy tại: http://localhost:{PORT}")
+    socketserver.TCPServer.allow_reuse_address = True
+    with socketserver.TCPServer(("", PORT), UnifiedHandler) as httpd:
+        print("=======================================================================")
+        print(f"🚀 FocusFlow Server đang chạy toàn diện tại: http://localhost:{PORT}")
+        print(f"🌐 Mở trình duyệt tại: http://localhost:{PORT}")
         is_cfg = bool(EMAIL_USER and EMAIL_APP_PASSWORD and EMAIL_USER != "your_email@gmail.com")
         print(f"📧 Trạng thái SMTP Gmail: {'✅ Đã cấu hình (' + EMAIL_USER + ')' if is_cfg else '⚠️ Chưa cấu hình (Chế độ mô phỏng/Demo)'}")
-        print("=======================================================")
+        print("=======================================================================")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

@@ -13,7 +13,12 @@ import {
   Sparkles,
   KeyRound,
   Server,
-  Info
+  Info,
+  Settings,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Check
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { requestEmailOtp, verifyEmailOtp, checkAuthServerHealth } from '../../utils/otpAuth';
@@ -35,6 +40,12 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
   const [errorMessage, setErrorMessage] = useState(null);
   const [serverInfo, setServerInfo] = useState(null);
   const [demoCodeHint, setDemoCodeHint] = useState(null);
+
+  // In-app SMTP config state
+  const [showSmtpConfig, setShowSmtpConfig] = useState(false);
+  const [smtpEmailInput, setSmtpEmailInput] = useState('');
+  const [smtpPasswordInput, setSmtpPasswordInput] = useState('');
+  const [isSavingSmtp, setIsSavingSmtp] = useState(false);
 
   // Expiration countdown (5 minutes = 300s)
   const [countdown, setCountdown] = useState(300);
@@ -96,6 +107,45 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
   };
 
   // -------------------------------------------------------------
+  // HANDLER: LƯU CẤU HÌNH GMAIL SMTP TRỰC TIẾP
+  // -------------------------------------------------------------
+  const handleSaveSmtpConfig = async (e) => {
+    e.preventDefault();
+    const cleanUser = smtpEmailInput.trim().toLowerCase();
+    const cleanPass = smtpPasswordInput.replace(/\s+/g, '');
+
+    if (!cleanUser || !cleanUser.includes('@')) {
+      showToast('Vui lòng nhập địa chỉ Gmail gửi hợp lệ!', 'warning');
+      return;
+    }
+    if (cleanPass.length < 8) {
+      showToast('Mật khẩu ứng dụng của Google gồm 16 chữ cái!', 'warning');
+      return;
+    }
+
+    setIsSavingSmtp(true);
+    try {
+      const res = await fetch('http://localhost:5000/api/auth/save-smtp-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailUser: cleanUser, emailAppPassword: cleanPass })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        showToast('✅ ' + data.message, 'success', 5000);
+        setShowSmtpConfig(false);
+        checkAuthServerHealth().then(info => setServerInfo(info));
+      } else {
+        showToast(data.message || 'Không thể lưu cấu hình SMTP.', 'error');
+      }
+    } catch (err) {
+      showToast('Backend chưa bật. Hãy chạy python server.py trước!', 'warning');
+    } finally {
+      setIsSavingSmtp(false);
+    }
+  };
+
+  // -------------------------------------------------------------
   // HANDLER: GỬI MÃ OTP (BƯỚC 1)
   // -------------------------------------------------------------
   const handleSendOtp = async (e) => {
@@ -146,34 +196,29 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
   // HANDLER: XỬ LÝ NHẬP 6 Ô OTP
   // -------------------------------------------------------------
   const handleOtpChange = (index, value) => {
-    // Chỉ chấp nhận số
     const num = value.replace(/\D/g, '');
     if (!num && value !== '') return;
 
     const newDigits = [...otpDigits];
-    newDigits[index] = num.slice(-1); // Lấy ký tự số cuối cùng
+    newDigits[index] = num.slice(-1);
     setOtpDigits(newDigits);
 
-    // Tự động nhảy sang ô tiếp theo nếu đã nhập
     if (num && index < 5) {
       otpInputRefs.current[index + 1]?.focus();
     }
 
-    // Tự động submit khi nhập đủ 6 số
     const fullCode = newDigits.join('');
     if (fullCode.length === 6 && !newDigits.includes('')) {
       handleVerifyOtp(fullCode);
     }
   };
 
-  // Xử lý phím Backspace để lùi ô
   const handleOtpKeyDown = (index, e) => {
     if (e.key === 'Backspace' && !otpDigits[index] && index > 0) {
       otpInputRefs.current[index - 1]?.focus();
     }
   };
 
-  // Xử lý Paste cả chuỗi 6 số
   const handleOtpPaste = (e) => {
     e.preventDefault();
     const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
@@ -233,7 +278,7 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-md animate-fade-in">
-      <div className="glass-card w-full max-w-md rounded-3xl shadow-2xl p-6 sm:p-7 border border-slate-200/90 dark:border-slate-800/90 relative overflow-hidden bg-white/95 dark:bg-slate-900/95">
+      <div className="glass-card w-full max-w-md rounded-3xl shadow-2xl p-6 sm:p-7 border border-slate-200/90 dark:border-slate-800/90 relative overflow-hidden bg-white/95 dark:bg-slate-900/95 max-h-[92vh] overflow-y-auto">
         
         {/* Top Accent Gradient Line */}
         <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-brand-500 via-indigo-500 to-purple-500" />
@@ -308,15 +353,15 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
           /* ------------------------------------------------------------- */
           /* CASE 2: CHƯA ĐĂNG NHẬP (LUỒNG 2 BƯỚC OTP) */
           /* ------------------------------------------------------------- */
-          <div className="space-y-5 pt-1">
+          <div className="space-y-4 pt-1">
             
             {/* Header */}
             <div className="text-center space-y-1.5">
-              <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-tr from-brand-600 to-purple-600 flex items-center justify-center shadow-lg shadow-brand-500/25 text-white">
+              <div className="w-13 h-13 mx-auto rounded-2xl bg-gradient-to-tr from-brand-600 to-purple-600 flex items-center justify-center shadow-lg shadow-brand-500/25 text-white">
                 {step === 'EMAIL' ? (
-                  <Mail className="w-7 h-7" />
+                  <Mail className="w-6 h-6" />
                 ) : (
-                  <ShieldCheck className="w-7 h-7 animate-bounce-gentle" />
+                  <ShieldCheck className="w-6 h-6 animate-bounce-gentle" />
                 )}
               </div>
               <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-slate-100">
@@ -357,7 +402,7 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
                       setOtpDigits(digits);
                       handleVerifyOtp(demoCodeHint);
                     }}
-                    className="ml-2 underline font-bold hover:text-amber-900 dark:hover:text-amber-100"
+                    className="ml-2 underline font-bold hover:text-amber-900 dark:hover:text-amber-100 cursor-pointer"
                   >
                     Tự động điền & Đăng nhập
                   </button>
@@ -372,7 +417,7 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
               <form onSubmit={handleSendOtp} className="space-y-4">
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                    <span>Địa chỉ Email của bạn</span>
+                    <span>Địa chỉ Email nhận mã</span>
                     <span className="text-[10px] text-slate-400 font-normal">Gmail / Outlook / Công ty</span>
                   </label>
                   <div className="relative">
@@ -406,12 +451,78 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
                   )}
                 </button>
 
+                {/* Collapsible SMTP Configuration Box */}
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowSmtpConfig(!showSmtpConfig)}
+                    className="w-full flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-brand-500 transition py-1.5 px-2 rounded-xl bg-slate-100/70 dark:bg-slate-800/50 cursor-pointer"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Settings className="w-3.5 h-3.5" />
+                      <span>Cài đặt Gmail gửi mã OTP (SMTP)</span>
+                    </span>
+                    {showSmtpConfig ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </button>
+
+                  {showSmtpConfig && (
+                    <div className="mt-2 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-3 animate-fade-in text-xs">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          Gmail của bạn (gửi mã):
+                        </label>
+                        <input
+                          type="email"
+                          placeholder="phong09829@gmail.com"
+                          value={smtpEmailInput}
+                          onChange={(e) => setSmtpEmailInput(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          Mật khẩu ứng dụng 16 chữ cái (App Password):
+                        </label>
+                        <input
+                          type="password"
+                          placeholder="16 chữ cái (ví dụ: abcd efgh ijkl mnop)"
+                          value={smtpPasswordInput}
+                          onChange={(e) => setSmtpPasswordInput(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold outline-none font-mono"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1">
+                        <a 
+                          href="https://myaccount.google.com/apppasswords" 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="text-[11px] font-bold text-brand-600 dark:text-brand-400 hover:underline flex items-center gap-1"
+                        >
+                          <span>Lấy mã 16 chữ cái từ Google</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+
+                        <button
+                          type="button"
+                          onClick={handleSaveSmtpConfig}
+                          disabled={isSavingSmtp}
+                          className="px-3 py-1.5 rounded-xl bg-brand-600 text-white font-bold text-[11px] hover:bg-brand-500 transition cursor-pointer shadow-sm disabled:opacity-50"
+                        >
+                          {isSavingSmtp ? 'Đang lưu...' : 'Lưu Cấu Hình'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Server Status Footer */}
-                <div className="pt-2 text-center text-[11px] text-slate-400 dark:text-slate-500 flex items-center justify-center gap-1.5">
+                <div className="pt-1 text-center text-[11px] text-slate-400 dark:text-slate-500 flex items-center justify-center gap-1.5">
                   <span className={`w-2 h-2 rounded-full ${serverInfo?.status === 'ok' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
                   <span>
                     {serverInfo?.status === 'ok' 
-                      ? (serverInfo.emailConfigured ? 'Backend SMTP Gmail sẵn sàng' : 'Backend Online (Chế độ Test/Demo)') 
+                      ? (serverInfo.emailConfigured ? 'Máy chủ Gmail SMTP sẵn sàng' : 'Máy chủ Online (Chế độ Test/Demo)') 
                       : 'Hệ thống tự động kích hoạt chế độ OTP'}
                   </span>
                 </div>

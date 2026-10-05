@@ -339,20 +339,63 @@ app.post('/api/auth/verify-otp', async (req, res) => {
   }
 });
 
+// API 3: Cập nhật cấu hình Gmail SMTP từ UI
+app.post('/api/auth/save-smtp-config', (req, res) => {
+  try {
+    const { emailUser, emailAppPassword } = req.body;
+    if (!emailUser || !isValidEmail(emailUser)) {
+      return res.status(400).json({ ok: false, message: 'Địa chỉ Gmail không hợp lệ!' });
+    }
+    const cleanPwd = (emailAppPassword || '').replace(/\s+/g, '');
+    if (cleanPwd.length < 8) {
+      return res.status(400).json({ ok: false, message: 'Mật khẩu ứng dụng Google phải có 16 chữ cái!' });
+    }
+
+    process.env.EMAIL_USER = emailUser.trim().toLowerCase();
+    process.env.EMAIL_APP_PASSWORD = cleanPwd;
+
+    // Cập nhật file .env
+    const envPath = path.join(__dirname, '.env');
+    const envData = `# Cấu hình Gmail SMTP tự động cập nhật
+PORT=${PORT}
+EMAIL_USER=${process.env.EMAIL_USER}
+EMAIL_APP_PASSWORD=${process.env.EMAIL_APP_PASSWORD}
+JWT_SECRET=${JWT_SECRET}
+CLIENT_URL=http://localhost:5173
+`;
+    import('fs').then(fs => {
+      fs.writeFileSync(envPath, envData, 'utf-8');
+      console.log(`[Config] Đã cập nhật file .env với email: ${process.env.EMAIL_USER}`);
+    });
+
+    return res.json({
+      ok: true,
+      message: `Đã lưu và kích hoạt cấu hình Gmail SMTP cho '${emailUser}' thành công!`
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, message: 'Lỗi khi lưu cấu hình SMTP.' });
+  }
+});
+
 // Health check API
 app.get('/api/health', (req, res) => {
-  const isEmailConfigured = Boolean(EMAIL_USER && EMAIL_APP_PASSWORD && EMAIL_USER !== 'your_email@gmail.com');
+  const currentEmail = process.env.EMAIL_USER || EMAIL_USER;
+  const currentPass = process.env.EMAIL_APP_PASSWORD || EMAIL_APP_PASSWORD;
+  const isEmailConfigured = Boolean(currentEmail && currentPass && currentEmail !== 'your_email@gmail.com');
   res.json({
     status: 'ok',
     server: 'FocusFlow Auth Server (Node.js/Express)',
     emailConfigured: isEmailConfigured,
-    emailUser: isEmailConfigured ? EMAIL_USER.replace(/(.{2})(.*)(@.*)/, '$1***$3') : 'Chưa cấu hình'
+    emailUser: isEmailConfigured ? currentEmail.replace(/(.{2})(.*)(@.*)/, '$1***$3') : 'Chưa cấu hình'
   });
 });
 
+// Phục vụ giao diện web tĩnh
+app.use(express.static(__dirname));
+
 app.listen(PORT, () => {
   console.log(`=======================================================`);
-  console.log(`🚀 FocusFlow OTP Auth Server đang chạy tại: http://localhost:${PORT}`);
-  console.log(`📧 Trạng thái SMTP Gmail: ${Boolean(EMAIL_USER && EMAIL_APP_PASSWORD && EMAIL_USER !== 'your_email@gmail.com') ? '✅ Đã cấu hình' : '⚠️ Chưa cấu hình (Chế độ mô phỏng/Demo)'}`);
+  console.log(`🚀 FocusFlow Server đang chạy tại: http://localhost:${PORT}`);
+  console.log(`📧 Trạng thái SMTP Gmail: ${Boolean(process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD && process.env.EMAIL_USER !== 'your_email@gmail.com') ? '✅ Đã cấu hình' : '⚠️ Chưa cấu hình (Chế độ mô phỏng/Demo)'}`);
   console.log(`=======================================================`);
 });
