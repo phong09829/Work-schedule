@@ -64,7 +64,7 @@ export const SettingsModal = ({ isOpen, onClose }) => {
 
   const handleTestSound = () => {
     soundManager.testSound(formData.soundVolume);
-    showToast('Đang phát âm thanh chuông thử nghiệm 🔔', 'info', 1500);
+    showToast('Đang phát âm thanh chuông thông báo 🔔', 'info', 1500);
   };
 
   const handleFileUpload = (e) => {
