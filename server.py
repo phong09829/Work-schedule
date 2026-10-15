@@ -21,6 +21,9 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from urllib.parse import urlparse
 
+import email.utils
+from email.header import Header
+
 # Reconfigure stdout/stderr for Unicode support on Windows
 if sys.platform == "win32":
     try:
@@ -98,9 +101,11 @@ def send_smtp_email(to_email, otp_code):
 
     try:
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"🔐 Mã xác nhận đăng nhập FocusFlow: {otp_code}"
+        msg["Subject"] = Header(f"🔐 Mã xác thực đăng nhập FocusFlow: {otp_code}", "utf-8")
         msg["From"] = f"FocusFlow Auth <{EMAIL_USER}>"
         msg["To"] = to_email
+        msg["Date"] = email.utils.formatdate(localtime=True)
+        msg["Message-ID"] = email.utils.make_msgid(domain="gmail.com")
 
         html_content = f"""
         <!DOCTYPE html>
@@ -250,12 +255,11 @@ class UnifiedHandler(http.server.SimpleHTTPRequestHandler):
                     "mode": "smtp_sent"
                 })
             else:
-                safe_log(f"[OTP Warning] SMTP thất bại: {msg}")
-                return self._send_json(200, {
-                    "ok": True,
-                    "message": f"Mã OTP 6 số đã được gửi tới {email}. Vui lòng kiểm tra hộp thư (cả mục Spam)!",
-                    "expiresIn": 300,
-                    "mode": "dev_mode"
+                safe_log(f"[OTP Error] SMTP gửi thất bại: {msg}")
+                return self._send_json(500, {
+                    "ok": False,
+                    "message": f"Không thể gửi email qua Gmail SMTP: {msg}. Vui lòng kiểm tra cấu hình tài khoản gửi!",
+                    "error": str(msg)
                 })
 
         elif parsed.path == "/api/auth/verify-otp":
@@ -322,12 +326,42 @@ class UnifiedHandler(http.server.SimpleHTTPRequestHandler):
                 "message": f"Đã lưu và kích hoạt cấu hình Gmail SMTP cho '{user}' thành công!"
             })
 
+        elif parsed.path == "/api/auth/test-smtp":
+            load_env_file()
+            test_target = (body.get("email") or EMAIL_USER).strip().lower()
+            if not is_valid_email(test_target):
+                test_target = EMAIL_USER
+            test_code = "999888"
+            success, err_msg = send_smtp_email(test_target, test_code)
+            if success:
+                return self._send_json(200, {
+                    "ok": True,
+                    "message": f"Kết nối SMTP hoàn hảo! Đã gửi email thử nghiệm thành công tới {test_target}."
+                })
+            else:
+                return self._send_json(500, {
+                    "ok": False,
+                    "message": f"Kiểm tra thất bại: {err_msg}",
+                    "error": str(err_msg)
+                })
+
         else:
             self._send_json(404, {"error": "Endpoint not found"})
 
 
+def _auto_open_browser():
+    time.sleep(1.0)
+    try:
+        import webbrowser
+        webbrowser.open(f"http://localhost:{PORT}")
+    except Exception:
+        pass
+
 def run():
     socketserver.TCPServer.allow_reuse_address = True
+    import threading
+    threading.Thread(target=_auto_open_browser, daemon=True).start()
+
     with socketserver.TCPServer(("", PORT), UnifiedHandler) as httpd:
         safe_log("=======================================================================")
         safe_log(f"🚀 FocusFlow Server đang chạy toàn diện tại: http://localhost:{PORT}")

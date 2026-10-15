@@ -4,7 +4,7 @@
 
 const API_BASE_URL = typeof window !== 'undefined' && window.__FOCUSFLOW_API_URL__
   ? window.__FOCUSFLOW_API_URL__
-  : 'http://localhost:5000';
+  : (typeof window !== 'undefined' && window.location.protocol.startsWith('http') ? window.location.origin : 'http://localhost:5000');
 
 export const OTP_STORAGE_KEYS = {
   TOKEN: 'focusflow_otp_jwt_token',
@@ -42,7 +42,7 @@ export async function requestEmailOtp(email) {
   
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     const res = await fetch(`${API_BASE_URL}/api/auth/send-otp`, {
       method: 'POST',
@@ -58,7 +58,6 @@ export async function requestEmailOtp(email) {
     console.warn('[OTP Client] Server offline hoặc không thể kết nối tới', API_BASE_URL, err);
     
     // Client-side local sandbox fallback if backend is not yet started:
-    // Tạo mã OTP client-side để người dùng vẫn có thể trải nghiệm tức thì
     const fallbackOtp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = Date.now() + 5 * 60 * 1000;
     
@@ -70,7 +69,8 @@ export async function requestEmailOtp(email) {
     return {
       ok: true,
       mode: 'client_fallback',
-      message: `Mã OTP đã được gửi đến email của bạn! Vui lòng kiểm tra hộp thư.`,
+      fallbackCode: fallbackOtp,
+      message: `Máy chủ Backend chưa bật (chưa gửi email thật). Mã thử nghiệm offline là: ${fallbackOtp}`,
       expiresIn: 300
     };
   }

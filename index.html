@@ -71,45 +71,82 @@
       font-variant-numeric: tabular-nums;
     }
 
+    /* Ultra Modern Glassmorphism Design System */
     .glass-card {
       background: rgba(255, 255, 255, 0.88);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid rgba(229, 231, 235, 0.9);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid rgba(226, 232, 240, 0.85);
+      box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.05), 0 0 1px 1px rgba(255, 255, 255, 0.6) inset;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .dark .glass-card {
-      background: rgba(17, 24, 39, 0.78);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
+      background: rgba(13, 20, 36, 0.78);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
       border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 15px 35px -10px rgba(0, 0, 0, 0.5), 0 0 1px 1px rgba(255, 255, 255, 0.04) inset;
+    }
+
+    .glass-card:hover {
+      box-shadow: 0 15px 35px -8px rgba(99, 102, 241, 0.12);
+    }
+
+    .dark .glass-card:hover {
+      border-color: rgba(99, 102, 241, 0.25);
+      box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.7), 0 0 25px -5px rgba(99, 102, 241, 0.18);
     }
 
     .glass-nav {
-      background: rgba(255, 255, 255, 0.85);
-      backdrop-filter: blur(20px);
-      border-bottom: 1px solid rgba(229, 231, 235, 0.8);
+      background: rgba(255, 255, 255, 0.82);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+      box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.03);
     }
 
     .dark .glass-nav {
-      background: rgba(11, 15, 25, 0.85);
-      backdrop-filter: blur(20px);
+      background: rgba(9, 14, 26, 0.85);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
       border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+      box-shadow: 0 4px 25px -2px rgba(0, 0, 0, 0.4);
     }
 
     .ambient-glow {
       position: absolute;
-      filter: blur(90px);
-      opacity: 0.18;
+      filter: blur(100px);
+      opacity: 0.22;
       pointer-events: none;
       z-index: 0;
       border-radius: 50%;
+      animation: floatGlow 12s ease-in-out infinite alternate;
     }
 
     .dark .ambient-glow {
-      opacity: 0.12;
+      opacity: 0.18;
     }
 
+    @keyframes floatGlow {
+      0% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(20px, 15px) scale(1.08); }
+      100% { transform: translate(-15px, -10px) scale(0.96); }
+    }
+
+    /* Shimmer Button Effect */
+    .btn-gradient-shimmer {
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #ec4899 100%);
+      background-size: 200% 200%;
+      transition: all 0.3s ease;
+    }
+    .btn-gradient-shimmer:hover {
+      background-position: right center;
+      transform: translateY(-1px);
+      box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.45);
+    }
+
+    /* Scrollbar */
     ::-webkit-scrollbar {
       width: 6px;
       height: 6px;
@@ -118,11 +155,11 @@
       background: transparent;
     }
     ::-webkit-scrollbar-thumb {
-      background: rgba(156, 163, 175, 0.3);
+      background: rgba(148, 163, 184, 0.3);
       border-radius: 9999px;
     }
     ::-webkit-scrollbar-thumb:hover {
-      background: rgba(156, 163, 175, 0.5);
+      background: rgba(99, 102, 241, 0.5);
     }
 
     @keyframes fadeIn {
@@ -131,6 +168,14 @@
     }
     .animate-fade-in {
       animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    @keyframes pulseSoft {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.04); opacity: 0.85; }
+    }
+    .animate-pulse-soft {
+      animation: pulseSoft 2.5s infinite ease-in-out;
     }
   </style>
 </head>
@@ -2301,31 +2346,31 @@
                 <div className="flex items-center gap-1.5 sm:gap-2.5">
                   <button
                     onClick={() => setIsGoogleModalOpen(true)}
-                    title={isAccountLoggedIn ? `Tài khoản Google: ${currentUser?.email}` : 'Đăng nhập bằng tài khoản Google'}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs font-bold transition-all shadow-sm cursor-pointer ${
+                    title={isAccountLoggedIn ? `Tài khoản: ${currentUser?.email}` : 'Đăng nhập Gmail bằng mã OTP'}
+                    className={`flex items-center gap-2 px-3.5 py-2 rounded-2xl border text-xs font-bold transition-all shadow-sm cursor-pointer select-none ${
                       isAccountLoggedIn
-                        ? 'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-300'
-                        : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border-slate-200 dark:border-slate-700 hover:shadow-md hover:border-blue-400'
+                        ? 'bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-300 hover:border-emerald-400'
+                        : 'btn-gradient-shimmer text-white border-transparent shadow-lg shadow-indigo-500/25 hover:scale-[1.02]'
                     }`}
                   >
                     {isAccountLoggedIn ? (
                       <>
                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                        <span className="hidden sm:inline">
+                        <span className="hidden sm:inline font-bold">
                           {currentUser?.name?.split(' ')[0] || currentUser?.email?.split('@')[0]}
                         </span>
                         <span>{isCloudSyncing ? '🔄' : '☁️'}</span>
                       </>
                     ) : (
                       <>
-                        <span>✉️</span>
-                        <span>Đăng Nhập OTP</span>
+                        <span className="text-sm leading-none">✉️</span>
+                        <span>Đăng Nhập Gmail (OTP)</span>
                       </>
                     )}
                   </button>
 
-                  <div title={`Chuỗi ${streakDays} ngày liên tục`} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold select-none">
-                    <span>🔥</span>
+                  <div title={`Chuỗi ${streakDays} ngày làm việc liên tục`} className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-600 dark:text-amber-400 text-xs font-bold select-none shadow-sm">
+                    <span className="text-sm">🔥</span>
                     <span>{streakDays}d</span>
                   </div>
 
@@ -2714,42 +2759,54 @@
             </div>
           </div>
 
-          {/* Metric Cards */}
+          {/* Metric KPI Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-            <div className="glass-card rounded-2xl p-5 border border-slate-200 dark:border-slate-800">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-400">Việc Xong Hôm Nay</span>
-                <span className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500 text-lg">✅</span>
+            <div className="glass-card rounded-3xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800/80 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl group-hover:bg-emerald-500/20 transition-all pointer-events-none" />
+              <div className="flex items-center justify-between relative z-10">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Việc Xong Hôm Nay</span>
+                <span className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-500 text-lg shadow-sm">✅</span>
               </div>
-              <h3 className="text-2xl font-extrabold mt-2">{todayCompletedTasks}</h3>
-              <p className="text-xs text-slate-400 mt-1">Tổng hoàn thành: {totalCompletedTasks} việc</p>
+              <h3 className="text-3xl font-black mt-3 text-slate-900 dark:text-white tracking-tight relative z-10">{todayCompletedTasks}</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 flex items-center gap-1 relative z-10">
+                <span className="font-semibold text-emerald-500">+{todayCompletedTasks}</span> việc mới • Tổng {totalCompletedTasks} việc
+              </p>
             </div>
 
-            <div className="glass-card rounded-2xl p-5 border border-slate-200 dark:border-slate-800">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-400">Thời Gian Tập Trung</span>
-                <span className="p-2 rounded-xl bg-indigo-500/10 text-indigo-500 text-lg">🕒</span>
+            <div className="glass-card rounded-3xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800/80 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl group-hover:bg-indigo-500/20 transition-all pointer-events-none" />
+              <div className="flex items-center justify-between relative z-10">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Thời Gian Tập Trung</span>
+                <span className="w-10 h-10 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-500 text-lg shadow-sm">🕒</span>
               </div>
-              <h3 className="text-2xl font-extrabold mt-2">{hours}h</h3>
-              <p className="text-xs text-slate-400 mt-1">{todayFocusMinutes} phút tập trung sâu</p>
+              <h3 className="text-3xl font-black mt-3 text-slate-900 dark:text-white tracking-tight relative z-10">{hours}h</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 relative z-10">
+                <strong className="text-indigo-500 dark:text-indigo-400">{todayFocusMinutes}</strong> phút tập trung chất lượng
+              </p>
             </div>
 
-            <div className="glass-card rounded-2xl p-5 border border-slate-200 dark:border-slate-800">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-400">Phiên Pomodoro</span>
-                <span className="p-2 rounded-xl bg-purple-500/10 text-purple-500 text-lg">🍅</span>
+            <div className="glass-card rounded-3xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800/80 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/10 rounded-full blur-2xl group-hover:bg-purple-500/20 transition-all pointer-events-none" />
+              <div className="flex items-center justify-between relative z-10">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Phiên Pomodoro</span>
+                <span className="w-10 h-10 rounded-2xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-500 text-lg shadow-sm">🍅</span>
               </div>
-              <h3 className="text-2xl font-extrabold mt-2">{todayPomoCount}</h3>
-              <p className="text-xs text-slate-400 mt-1">Mục tiêu: {targetPomos} phiên/ngày</p>
+              <h3 className="text-3xl font-black mt-3 text-slate-900 dark:text-white tracking-tight relative z-10">{todayPomoCount}</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 relative z-10">
+                Đạt <span className="font-bold text-purple-500 dark:text-purple-400">{goalProgress}%</span> mục tiêu ({targetPomos} phiên/ngày)
+              </p>
             </div>
 
-            <div className="glass-card rounded-2xl p-5 border border-slate-200 dark:border-slate-800">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-400">Chuỗi Kỷ Lục</span>
-                <span className="p-2 rounded-xl bg-amber-500/10 text-amber-500 text-lg">🔥</span>
+            <div className="glass-card rounded-3xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800/80 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl group-hover:bg-amber-500/20 transition-all pointer-events-none" />
+              <div className="flex items-center justify-between relative z-10">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Chuỗi Kỷ Lục</span>
+                <span className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-500 text-lg shadow-sm">🔥</span>
               </div>
-              <h3 className="text-2xl font-extrabold mt-2">{streakDays} ngày</h3>
-              <p className="text-xs text-amber-500 font-bold mt-1">Đang cháy!</p>
+              <h3 className="text-3xl font-black mt-3 text-slate-900 dark:text-white tracking-tight relative z-10">{streakDays} ngày</h3>
+              <p className="text-xs text-amber-600 dark:text-amber-400 font-bold mt-1.5 flex items-center gap-1 relative z-10">
+                <span>⚡</span> Giữ vững chuỗi phong độ!
+              </p>
             </div>
           </div>
 
@@ -3877,7 +3934,13 @@
     // =========================================================================================
     // 🔑 CẤU HÌNH GOOGLE CLIENT ID (STANDALONE HTML)
     // =========================================================================================
-    const DEFAULT_GOOGLE_CLIENT_ID = "ĐIỀN_CLIENT_ID_CỦA_BẠN_VÀO_ĐÂY";
+    // Helper: Dynamic API Origin for Backend OTP Server
+    const getApiBase = () => {
+      if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
+        return window.location.origin;
+      }
+      return 'http://localhost:5000';
+    };
 
     // --- OTP EMAIL PASSWORDLESS MODAL (STANDALONE) ---
     function OtpModalStandalone({
@@ -3905,24 +3968,45 @@
       const [otp, setOtp] = React.useState('');
       const [isLoading, setIsLoading] = React.useState(false);
       const [errorMessage, setErrorMessage] = React.useState(null);
+      const [successMessage, setSuccessMessage] = React.useState(null);
       const [countdown, setCountdown] = React.useState(300);
       const [resendCooldown, setResendCooldown] = React.useState(0);
-      const [serverHealthy, setServerHealthy] = React.useState(false);
+      const [serverHealthy, setServerHealthy] = React.useState(null); // null = checking, true = online, false = offline
+      const [smtpConfigured, setSmtpConfigured] = React.useState(false);
+      const [smtpSender, setSmtpSender] = React.useState('');
+      const [fallbackCode, setFallbackCode] = React.useState(null);
+      const [isTestingSmtp, setIsTestingSmtp] = React.useState(false);
+      const [testResult, setTestResult] = React.useState(null);
 
       const masterInputRef = React.useRef(null);
+
+      const checkHealth = React.useCallback(() => {
+        fetch(`${getApiBase()}/api/health`)
+          .then(res => res.json())
+          .then(data => {
+            const ok = data.status === 'ok';
+            setServerHealthy(ok);
+            setSmtpConfigured(Boolean(data.emailConfigured));
+            if (data.emailUser) setSmtpSender(data.emailUser);
+          })
+          .catch(() => {
+            setServerHealthy(false);
+            setSmtpConfigured(false);
+          });
+      }, []);
 
       React.useEffect(() => {
         if (!isOpen) return;
         setErrorMessage(null);
+        setSuccessMessage(null);
+        setTestResult(null);
         if (!isAccountLoggedIn) {
           setStep('EMAIL');
           setOtp('');
+          setFallbackCode(null);
         }
-        fetch('http://localhost:5000/api/health')
-          .then(res => res.json())
-          .then(data => setServerHealthy(data.status === 'ok'))
-          .catch(() => setServerHealthy(false));
-      }, [isOpen, isAccountLoggedIn]);
+        checkHealth();
+      }, [isOpen, isAccountLoggedIn, checkHealth]);
 
       React.useEffect(() => {
         let timer = null;
@@ -3944,7 +4028,7 @@
         if (step === 'OTP') {
           setTimeout(() => {
             masterInputRef.current?.focus();
-          }, 100);
+          }, 120);
         }
       }, [step]);
 
@@ -3956,19 +4040,45 @@
         return `${m}:${s}`;
       };
 
+      const handleTestSmtp = async () => {
+        setIsTestingSmtp(true);
+        setTestResult(null);
+        try {
+          const res = await fetch(`${getApiBase()}/api/auth/test-smtp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: email.trim().toLowerCase() || undefined })
+          });
+          const data = await res.json();
+          if (res.ok && data.ok) {
+            setTestResult({ ok: true, msg: data.message || 'Kết nối Gmail SMTP hoạt động hoàn hảo!' });
+            showToast('✅ Kết nối Gmail SMTP hoạt động!', 'success');
+          } else {
+            setTestResult({ ok: false, msg: data.message || 'Kiểm tra thất bại.' });
+            showToast(data.message || 'Lỗi kiểm tra SMTP.', 'error');
+          }
+        } catch (err) {
+          setTestResult({ ok: false, msg: 'Backend chưa chạy. Hãy mở file start_app.bat!' });
+          showToast('Backend chưa bật!', 'warning');
+        } finally {
+          setIsTestingSmtp(false);
+        }
+      };
+
       const handleSendOtp = async (e) => {
         if (e) e.preventDefault();
         const cleanEmail = email.trim().toLowerCase();
         if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-          setErrorMessage('Vui lòng nhập địa chỉ email hợp lệ!');
+          setErrorMessage('Vui lòng nhập địa chỉ Gmail / Email hợp lệ!');
           return;
         }
 
         setIsLoading(true);
         setErrorMessage(null);
+        setSuccessMessage(null);
 
         try {
-          const res = await fetch('http://localhost:5000/api/auth/send-otp', {
+          const res = await fetch(`${getApiBase()}/api/auth/send-otp`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email: cleanEmail })
@@ -3979,18 +4089,23 @@
             setCountdown(300);
             setResendCooldown(60);
             setOtp('');
-            showToast(data.message || 'Mã OTP đã được gửi đến email của bạn!', 'success');
+            setFallbackCode(null);
+            setSuccessMessage(data.message || `Mã OTP đã được gửi đến email ${cleanEmail}!`);
+            showToast(data.message || 'Mã OTP đã được gửi về Gmail của bạn!', 'success');
           } else {
             setErrorMessage(data.message || 'Không thể gửi mã OTP.');
           }
         } catch (err) {
-          const fallbackOtp = Math.floor(100000 + Math.random() * 900000).toString();
-          sessionStorage.setItem('standalone_otp_' + cleanEmail, JSON.stringify({ code: fallbackOtp, exp: Date.now() + 300000 }));
+          // Backend offline fallback mode
+          const demoCode = Math.floor(100000 + Math.random() * 900000).toString();
+          sessionStorage.setItem('standalone_otp_' + cleanEmail, JSON.stringify({ code: demoCode, exp: Date.now() + 300000 }));
           setStep('OTP');
           setCountdown(300);
           setResendCooldown(60);
           setOtp('');
-          showToast('Mã OTP đã được tạo. Vui lòng kiểm tra hộp thư!', 'info');
+          setFallbackCode(demoCode);
+          setServerHealthy(false);
+          showToast('Chế độ thử nghiệm offline đã kích hoạt!', 'info');
         } finally {
           setIsLoading(false);
         }
@@ -4015,7 +4130,7 @@
           let verified = false;
 
           try {
-            const res = await fetch('http://localhost:5000/api/auth/verify-otp', {
+            const res = await fetch(`${getApiBase()}/api/auth/verify-otp`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ email: cleanEmail, otp: finalOtp })
@@ -4036,6 +4151,8 @@
               } else {
                 setErrorMessage('Mã OTP không chính xác hoặc đã hết hạn.');
               }
+            } else {
+              setErrorMessage('Không thể kết nối đến máy chủ xác thực.');
             }
           }
 
@@ -4043,8 +4160,8 @@
             const name = cleanEmail.split('@')[0];
             if (onLoginAccount) onLoginAccount({ email: cleanEmail, name });
             else if (onRegisterAccount) onRegisterAccount({ email: cleanEmail, name });
-            if (typeof confetti === 'function') confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
-            showToast('🎉 Chào mừng ' + name + '! Bạn đã đăng nhập bằng mã OTP thành công (' + cleanEmail + ').', 'success');
+            if (typeof confetti === 'function') confetti({ particleCount: 90, spread: 80, origin: { y: 0.6 } });
+            showToast(`🎉 Chào mừng ${name}! Đăng nhập thành công với tài khoản ${cleanEmail}.`, 'success');
             onClose();
           }
         } finally {
@@ -4068,86 +4185,224 @@
       };
 
       return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-md animate-fade-in">
-          <div className="glass-card w-full max-w-md rounded-3xl shadow-2xl p-6 sm:p-7 border border-slate-200 dark:border-slate-800 relative bg-white/95 dark:bg-[#0D1424]/95">
-            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-t-3xl" />
-            <button onClick={onClose} className="absolute top-4 right-4 p-2 rounded-xl text-slate-400 hover:text-white transition">✕</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="glass-card w-full max-w-md rounded-3xl shadow-2xl p-6 sm:p-7 border border-slate-200 dark:border-slate-800/80 relative bg-white/95 dark:bg-[#0B1120]/95 overflow-hidden">
+            {/* Top decorative gradient bar */}
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
+            <button 
+              onClick={onClose} 
+              className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 transition"
+              title="Đóng"
+            >
+              ✕
+            </button>
 
             {isAccountLoggedIn ? (
-              <div className="space-y-5 pt-2 text-center">
-                <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-2xl">✓</div>
+              <div className="space-y-5 pt-3 text-center">
+                <div className="w-16 h-16 mx-auto rounded-3xl bg-gradient-to-tr from-emerald-500/20 to-teal-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 text-3xl shadow-lg shadow-emerald-500/10">
+                  ✓
+                </div>
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">Tài Khoản Đang Hoạt Động</h3>
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-xs font-bold mb-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Đã đăng nhập an toàn
+                  </div>
+                  <h3 className="text-xl font-extrabold text-slate-900 dark:text-white">
+                    {currentUser?.name || currentUser?.email?.split('@')[0]}
+                  </h3>
                   <p className="text-xs text-slate-400 font-mono mt-1">{currentUser?.email}</p>
                 </div>
-                <div className="flex gap-2 pt-2">
-                  <button onClick={onLogoutAccount} className="flex-1 py-2.5 rounded-xl bg-rose-500/10 text-rose-400 font-bold text-xs hover:bg-rose-500/20 transition">🚪 Đăng Xuất</button>
-                  <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-slate-800 text-white font-bold text-xs hover:bg-slate-700 transition">Đóng</button>
+                <div className="p-3.5 rounded-2xl bg-slate-100/80 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-left text-xs space-y-1.5">
+                  <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                    <span>Đồng bộ dữ liệu:</span>
+                    <span className="font-semibold text-emerald-500">Hoạt động bình thường</span>
+                  </div>
+                  <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                    <span>Phương thức:</span>
+                    <span className="font-semibold text-indigo-500 dark:text-indigo-400">OTP Gmail Passwordless</span>
+                  </div>
+                </div>
+                <div className="flex gap-2.5 pt-1">
+                  <button onClick={onLogoutAccount} className="flex-1 py-3 rounded-2xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 dark:text-rose-400 font-bold text-xs transition border border-rose-500/20">
+                    🚪 Đăng Xuất
+                  </button>
+                  <button onClick={onClose} className="flex-1 py-3 rounded-2xl bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-white font-bold text-xs hover:bg-slate-300 dark:hover:bg-slate-700 transition">
+                    Đóng
+                  </button>
                 </div>
               </div>
             ) : (
               <div className="space-y-4 pt-1">
-                <div className="text-center space-y-1">
-                  <div className="w-12 h-12 mx-auto rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center text-white text-xl shadow-lg shadow-indigo-500/25">
+                {/* Header with Icon */}
+                <div className="text-center space-y-2">
+                  <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-600 flex items-center justify-center text-white text-2xl shadow-xl shadow-indigo-500/30">
                     {step === 'EMAIL' ? '✉️' : '🔐'}
                   </div>
-                  <h3 className="text-lg font-extrabold text-slate-900 dark:text-white">
-                    {step === 'EMAIL' ? 'Đăng Nhập Bằng Mã OTP' : 'Nhập Mã Xác Thực'}
-                  </h3>
-                  <p className="text-xs text-slate-400 max-w-xs mx-auto">
-                    {step === 'EMAIL' 
-                      ? 'Nhập email để nhận mã OTP 6 chữ số qua hòm thư Gmail.'
-                      : 'Mã 6 chữ số đã gửi tới ' + email}
-                  </p>
+                  <div>
+                    <h3 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                      {step === 'EMAIL' ? 'Đăng Nhập Bằng Mã OTP' : 'Xác Thực Mã OTP'}
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto mt-1 leading-relaxed">
+                      {step === 'EMAIL' 
+                        ? 'Nhập địa chỉ Gmail để nhận mã OTP 6 chữ số gửi trực tiếp vào hòm thư.'
+                        : <span>Mã OTP 6 chữ số đã được gửi tới <strong className="text-indigo-400 font-mono">{email}</strong></span>}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Live Server Status Badge */}
+                <div className={`p-2.5 rounded-2xl text-xs flex items-center justify-between border ${
+                  serverHealthy === true
+                    ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400'
+                    : serverHealthy === false
+                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300'
+                    : 'bg-slate-100 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-500'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${
+                      serverHealthy === true ? 'bg-emerald-500 animate-pulse' : serverHealthy === false ? 'bg-amber-500' : 'bg-slate-400'
+                    }`} />
+                    <span className="font-semibold text-[11px]">
+                      {serverHealthy === true 
+                        ? (smtpConfigured ? `Gmail SMTP Sẵn Sàng (${smtpSender})` : 'Máy chủ Online') 
+                        : serverHealthy === false
+                        ? 'Máy chủ Backend đang tắt (Hãy bật start_app.bat)'
+                        : 'Đang kiểm tra kết nối...'}
+                    </span>
+                  </div>
+                  <button 
+                    type="button" 
+                    onClick={checkHealth} 
+                    className="text-[10px] underline font-bold hover:opacity-80"
+                    title="Kiểm tra lại kết nối"
+                  >
+                    Làm mới
+                  </button>
                 </div>
 
                 {errorMessage && (
-                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2">
-                    <span>⚠️</span><span>{errorMessage}</span>
+                  <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/25 text-rose-500 dark:text-rose-400 text-xs flex items-start gap-2 animate-fade-in">
+                    <span className="text-sm">⚠️</span>
+                    <span className="leading-snug">{errorMessage}</span>
+                  </div>
+                )}
+
+                {testResult && (
+                  <div className={`p-3 rounded-2xl text-xs flex items-start gap-2 border ${
+                    testResult.ok ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                  }`}>
+                    <span>{testResult.ok ? '✅' : '❌'}</span>
+                    <span className="leading-snug">{testResult.msg}</span>
                   </div>
                 )}
 
                 {step === 'EMAIL' ? (
-                  <form onSubmit={handleSendOtp} className="space-y-3 pt-1">
+                  <form onSubmit={handleSendOtp} className="space-y-3.5 pt-1">
                     <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <label className="text-xs font-bold text-slate-300">Địa chỉ Gmail / Email đăng nhập</label>
-                        <span className="text-[10px] text-emerald-400 font-semibold">Bất kỳ Gmail nào</span>
+                      <div className="flex justify-between items-center mb-1.5">
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                          Địa chỉ Gmail nhận mã
+                        </label>
+                        <span className="text-[10px] text-emerald-500 dark:text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                          Bất kỳ Gmail nào
+                        </span>
                       </div>
-                      <input
-                        type="email"
-                        required
-                        placeholder="nhap_email_cua_ban@gmail.com"
-                        value={email}
-                        onChange={e => setEmail(e.target.value)}
-                        className="w-full px-4 py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-sm font-semibold outline-none focus:border-indigo-500"
-                      />
-                      <p className="text-[11px] text-slate-400 mt-1.5 leading-tight">
-                        💡 Bạn có thể nhập <strong>bất kỳ Gmail nào</strong>. Mã OTP 6 số sẽ được gửi về hộp thư đó.
+                      <div className="relative">
+                        <input
+                          type="email"
+                          required
+                          placeholder="nhap_email_cua_ban@gmail.com"
+                          value={email}
+                          onChange={e => setEmail(e.target.value)}
+                          className="w-full px-4 py-3.5 rounded-2xl bg-slate-100/90 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/20 transition"
+                          autoFocus
+                        />
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                        💡 Hệ thống sẽ tự động gửi mã OTP 6 số về hòm thư này. Bạn không cần nhớ mật khẩu.
                       </p>
                     </div>
+
                     <button
                       type="submit"
                       disabled={isLoading || !email.trim()}
-                      className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 text-white font-extrabold text-sm shadow-lg shadow-indigo-500/25 transition disabled:opacity-50 cursor-pointer"
+                      className="w-full py-3.5 px-4 rounded-2xl btn-gradient-shimmer text-white font-extrabold text-sm shadow-xl shadow-indigo-500/25 transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
                     >
-                      {isLoading ? 'Đang gửi mã OTP...' : 'Gửi Mã Xác Nhận 6 Số →'}
+                      {isLoading ? (
+                        <>
+                          <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span>Đang gửi mã OTP tới Gmail...</span>
+                        </>
+                      ) : (
+                        <span>Gửi Mã Xác Nhận 6 Số →</span>
+                      )}
                     </button>
-                    <p className="text-[11px] text-center text-slate-500">
-                      {serverHealthy ? '🟢 Máy chủ OTP Backend Online' : '🟡 Hỗ trợ chế độ OTP tự động'}
-                    </p>
+
+                    {/* Quick test SMTP utility button */}
+                    <div className="pt-2 text-center">
+                      <button
+                        type="button"
+                        onClick={handleTestSmtp}
+                        disabled={isTestingSmtp}
+                        className="text-[11px] text-slate-400 hover:text-indigo-400 transition font-medium underline"
+                      >
+                        {isTestingSmtp ? 'Đang kiểm tra kết nối SMTP...' : '🔍 Thử kiểm tra gửi mail kết nối SMTP Gmail'}
+                      </button>
+                    </div>
                   </form>
                 ) : (
                   <div className="space-y-4 pt-1">
+                    {/* Fallback code banner if backend is offline */}
+                    {fallbackCode && (
+                      <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-amber-300">⚠️ Chế độ Thử Nghiệm Offline</span>
+                          <span className="font-mono font-black text-sm bg-amber-500/20 px-2.5 py-1 rounded-xl text-amber-300 tracking-wider">
+                            {fallbackCode}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-amber-300/80 leading-relaxed">
+                          Máy chủ Backend chưa được bật nên mã chưa thể gửi về Gmail thật. Để gửi mã thật về hòm thư Gmail, hãy chạy file <strong>start_app.bat</strong>!
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOtp(fallbackCode);
+                            handleVerifyOtp(fallbackCode);
+                          }}
+                          className="w-full py-2 px-3 rounded-xl bg-amber-500/25 hover:bg-amber-500/35 text-amber-200 font-bold text-xs transition border border-amber-500/30"
+                        >
+                          ⚡ Bấm để tự động điền mã {fallbackCode} & Đăng nhập ngay
+                        </button>
+                      </div>
+                    )}
+
+                    {!fallbackCode && (
+                      <div className="p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs flex items-start gap-2.5">
+                        <span className="text-base leading-none">📬</span>
+                        <div className="leading-relaxed">
+                          <span className="font-bold text-indigo-200">Đã gửi mã xác thực tới Gmail!</span>
+                          <p className="text-[11px] text-indigo-300/80 mt-0.5">
+                            Vui lòng kiểm tra Hộp thư đến (hoặc mục <strong>Thư rác / Spam</strong>).
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex justify-between items-center text-xs">
-                      <span className="font-bold text-slate-300">Mã OTP 6 chữ số</span>
-                      <span className={"font-mono font-bold " + (countdown <= 60 ? 'text-rose-400 animate-pulse' : 'text-slate-400')}>
+                      <span className="font-bold text-slate-700 dark:text-slate-300">Nhập mã 6 chữ số</span>
+                      <span className={`font-mono font-bold px-2 py-0.5 rounded-lg ${
+                        countdown <= 60 
+                          ? 'bg-rose-500/15 text-rose-500 dark:text-rose-400 animate-pulse' 
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                      }`}>
                         ⏱️ {formatTimer(countdown)}
                       </span>
                     </div>
 
+                    {/* 6 Digit Input Slots */}
                     <div 
-                      className="relative flex justify-between gap-1.5 sm:gap-2 py-1 cursor-text select-none"
+                      className="relative flex justify-between gap-1.5 sm:gap-2.5 py-1 cursor-text select-none"
                       onClick={() => masterInputRef.current?.focus()}
                     >
                       <input
@@ -4172,12 +4427,12 @@
                         return (
                           <div
                             key={index}
-                            className={`flex-1 h-12 sm:h-14 flex items-center justify-center text-xl sm:text-2xl font-black font-mono rounded-2xl border-2 transition-all duration-150 relative ${
+                            className={`flex-1 h-14 sm:h-16 flex items-center justify-center text-2xl font-black font-mono rounded-2xl border-2 transition-all duration-150 relative ${
                               isFilled
-                                ? 'bg-indigo-500/10 border-indigo-500 text-indigo-400 shadow-sm shadow-indigo-500/20 scale-[1.02]'
+                                ? 'bg-indigo-500/15 border-indigo-500 text-indigo-500 dark:text-indigo-400 shadow-md shadow-indigo-500/20 scale-[1.03]'
                                 : isCurrentActive
-                                ? 'border-indigo-500 ring-4 ring-indigo-500/20 bg-slate-800 text-white'
-                                : 'border-slate-300 dark:border-slate-700/80 bg-slate-100 dark:bg-slate-800/60 text-slate-400'
+                                ? 'border-indigo-500 ring-4 ring-indigo-500/20 bg-white dark:bg-slate-800 text-slate-900 dark:text-white'
+                                : 'border-slate-300 dark:border-slate-700/80 bg-slate-100/70 dark:bg-slate-800/60 text-slate-400'
                             }`}
                           >
                             {isFilled ? (
@@ -4185,34 +4440,47 @@
                             ) : isCurrentActive ? (
                               <span className="w-0.5 h-6 bg-indigo-500 animate-pulse rounded-full" />
                             ) : (
-                              <span className="text-slate-400 dark:text-slate-600 text-base font-normal">•</span>
+                              <span className="text-slate-300 dark:text-slate-600 text-sm font-normal">•</span>
                             )}
                           </div>
                         );
                       })}
                     </div>
 
-                    <p className="text-[11px] text-center text-slate-400 pt-0.5">
-                      📬 Nếu không thấy mã trong Hộp thư đến, vui lòng kiểm tra thêm mục <strong>Thư rác (Spam)</strong> hoặc <strong>Quảng cáo</strong>.
-                    </p>
-
                     <button
                       onClick={() => handleVerifyOtp()}
                       disabled={isLoading || otp.length !== 6 || countdown <= 0}
-                      className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 text-white font-extrabold text-sm shadow-lg shadow-indigo-500/25 transition disabled:opacity-50 cursor-pointer"
+                      className="w-full py-3.5 px-4 rounded-2xl btn-gradient-shimmer text-white font-extrabold text-sm shadow-xl shadow-indigo-500/25 transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
                     >
-                      {isLoading ? 'Đang xác thực...' : 'Xác Nhận & Đăng Nhập'}
+                      {isLoading ? (
+                        <>
+                          <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span>Đang xác thực...</span>
+                        </>
+                      ) : (
+                        <span>Xác Nhận & Đăng Nhập →</span>
+                      )}
                     </button>
 
-                    <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-800">
-                      <button type="button" onClick={() => setStep('EMAIL')} className="text-slate-400 hover:text-white font-semibold">← Đổi email</button>
+                    <div className="flex justify-between items-center text-xs pt-2 border-t border-slate-200 dark:border-slate-800/80">
+                      <button 
+                        type="button" 
+                        onClick={() => { setStep('EMAIL'); setErrorMessage(null); }} 
+                        className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold transition flex items-center gap-1"
+                      >
+                        ← Đổi email
+                      </button>
                       <button
                         type="button"
                         onClick={handleSendOtp}
                         disabled={resendCooldown > 0 || isLoading}
-                        className={"font-bold " + (resendCooldown > 0 ? 'text-slate-600 cursor-not-allowed' : 'text-indigo-400 hover:underline')}
+                        className={"font-bold transition " + (
+                          resendCooldown > 0 
+                            ? 'text-slate-400 dark:text-slate-600 cursor-not-allowed' 
+                            : 'text-indigo-600 dark:text-indigo-400 hover:underline'
+                        )}
                       >
-                        {resendCooldown > 0 ? 'Gửi lại sau (' + resendCooldown + 's)' : 'Gửi lại mã OTP'}
+                        {resendCooldown > 0 ? `Gửi lại sau (${resendCooldown}s)` : 'Gửi lại mã OTP'}
                       </button>
                     </div>
                   </div>

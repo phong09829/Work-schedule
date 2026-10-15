@@ -210,11 +210,9 @@ app.post('/api/auth/send-otp', async (req, res) => {
         });
       }
     } else {
-      return res.json({
-        ok: true,
-        message: `Mã OTP 6 số đã được gửi tới email ${cleanEmail}. Vui lòng kiểm tra hòm thư!`,
-        expiresIn: 300,
-        mode: 'dev_mode'
+      return res.status(500).json({
+        ok: false,
+        message: 'Chưa cấu hình tài khoản gửi Gmail SMTP (EMAIL_USER hoặc EMAIL_APP_PASSWORD trong .env)!'
       });
     }
 
@@ -370,6 +368,40 @@ CLIENT_URL=http://localhost:5173
     });
   } catch (err) {
     return res.status(500).json({ ok: false, message: 'Lỗi khi lưu cấu hình SMTP.' });
+  }
+});
+
+// Test SMTP connection endpoint
+app.post('/api/auth/test-smtp', async (req, res) => {
+  const { email } = req.body || {};
+  const currentEmail = process.env.EMAIL_USER || EMAIL_USER;
+  const testTarget = email && isValidEmail(email) ? email : currentEmail;
+  const transporter = createMailTransporter();
+
+  if (!transporter) {
+    return res.status(500).json({
+      ok: false,
+      message: 'Chưa cấu hình tài khoản gửi Gmail SMTP (EMAIL_USER hoặc EMAIL_APP_PASSWORD trong .env)!'
+    });
+  }
+
+  try {
+    await transporter.sendMail({
+      from: `"FocusFlow Auth" <${currentEmail}>`,
+      to: testTarget,
+      subject: '🔐 Kiểm tra kết nối gửi email FocusFlow',
+      html: '<p>Xin chào! Kết nối gửi email qua Gmail SMTP của FocusFlow đang hoạt động hoàn hảo!</p>',
+    });
+    return res.json({
+      ok: true,
+      message: `Kết nối SMTP hoàn hảo! Đã gửi email thử nghiệm thành công tới ${testTarget}.`
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      message: `Kiểm tra thất bại: ${err.message}`,
+      error: err.message
+    });
   }
 });
 
