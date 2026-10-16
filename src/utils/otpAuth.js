@@ -67,9 +67,11 @@ export async function requestEmailOtp(email) {
     }));
 
     return {
-      ok: false,
-      message: 'Không thể kết nối để gửi mã OTP. Vui lòng thử lại sau!',
-      expiresIn: 0
+      ok: true,
+      mode: 'client_fallback',
+      fallbackCode: fallbackOtp,
+      message: `Máy chủ Backend chưa bật (chưa gửi email thật). Mã thử nghiệm offline là: ${fallbackOtp}`,
+      expiresIn: 300
     };
   }
 }
