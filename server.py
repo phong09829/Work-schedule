@@ -349,6 +349,18 @@ class UnifiedHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json(404, {"error": "Endpoint not found"})
 
 
+def _get_local_ips():
+    import socket
+    ips = []
+    try:
+        host = socket.gethostname()
+        for ip in socket.gethostbyname_ex(host)[2]:
+            if not ip.startswith("127."):
+                ips.append(ip)
+    except Exception:
+        pass
+    return ips
+
 def _auto_open_browser():
     time.sleep(1.0)
     try:
@@ -359,20 +371,31 @@ def _auto_open_browser():
 
 def run():
     socketserver.TCPServer.allow_reuse_address = True
-    import threading
-    threading.Thread(target=_auto_open_browser, daemon=True).start()
+    no_browser = "--no-browser" in sys.argv or "--background" in sys.argv or os.environ.get("NO_BROWSER") == "1"
+    
+    if not no_browser:
+        import threading
+        threading.Thread(target=_auto_open_browser, daemon=True).start()
 
-    with socketserver.TCPServer(("", PORT), UnifiedHandler) as httpd:
-        safe_log("=======================================================================")
-        safe_log(f"🚀 FocusFlow Server đang chạy toàn diện tại: http://localhost:{PORT}")
-        safe_log(f"🌐 Mở trình duyệt tại: http://localhost:{PORT}")
-        is_cfg = bool(EMAIL_USER and EMAIL_APP_PASSWORD and EMAIL_USER != "your_email@gmail.com")
-        safe_log(f"📧 Trạng thái SMTP Gmail: {'✅ Đã cấu hình (' + EMAIL_USER + ')' if is_cfg else '⚠️ Chưa cấu hình (Chế độ mô phỏng/Demo)'}")
-        safe_log("=======================================================================")
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            safe_log("\nĐã dừng server.")
+    try:
+        with socketserver.TCPServer(("", PORT), UnifiedHandler) as httpd:
+            safe_log("=======================================================================")
+            safe_log(f"🚀 FocusFlow Server đang chạy toàn diện tại:")
+            safe_log(f"   🏠 Máy tính này:          http://localhost:{PORT}")
+            for lan_ip in _get_local_ips():
+                safe_log(f"   📱 Máy khác / Điện thoại: http://{lan_ip}:{PORT}")
+            is_cfg = bool(EMAIL_USER and EMAIL_APP_PASSWORD and EMAIL_USER != "your_email@gmail.com")
+            safe_log(f"📧 Trạng thái SMTP Gmail: {'✅ Đã cấu hình (' + EMAIL_USER + ')' if is_cfg else '⚠️ Chưa cấu hình (Chế độ mô phỏng/Demo)'}")
+            safe_log("=======================================================================")
+            try:
+                httpd.serve_forever()
+            except KeyboardInterrupt:
+                safe_log("\nĐã dừng server.")
+    except OSError as err:
+        if "10048" in str(err) or "already in use" in str(err).lower():
+            safe_log(f"[*] Cổng {PORT} đã đang được chạy bởi máy chủ trước đó.")
+        else:
+            raise err
 
 if __name__ == "__main__":
     run()

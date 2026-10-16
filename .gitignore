@@ -25,3 +25,6 @@ dist-ssr
 .env
 __pycache__/
 *.pyc
+cloudflared.exe
+public_url.txt
+tunnel_output.log

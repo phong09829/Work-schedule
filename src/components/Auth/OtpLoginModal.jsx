@@ -197,7 +197,7 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
         setOtp('');
         showToast(res.message || 'Mã OTP 6 số đã được gửi trực tiếp đến Gmail của bạn!', 'success', 5000);
       } else {
-        setErrorMessage(res.message || 'Không thể gửi mã OTP. Vui lòng thử lại!');
+        setErrorMessage(res.message || 'Không thể gửi mã OTP. Vui lòng kiểm tra lại kết nối!');
       }
     } catch (err) {
       setErrorMessage('Lỗi kết nối máy chủ. Vui lòng thử lại!');
@@ -437,93 +437,6 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
                   )}
                 </button>
 
-                {/* Collapsible SMTP Configuration Box */}
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowSmtpConfig(!showSmtpConfig)}
-                    className="w-full flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-brand-500 transition py-1.5 px-2 rounded-xl bg-slate-100/70 dark:bg-slate-800/50 cursor-pointer"
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <Settings className="w-3.5 h-3.5" />
-                      <span>Cài đặt Gmail gửi mã OTP (SMTP)</span>
-                    </span>
-                    {showSmtpConfig ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                  </button>
-
-                  {showSmtpConfig && (
-                    <div className="mt-2 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-3 animate-fade-in text-xs">
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                          Gmail của bạn (gửi mã):
-                        </label>
-                        <input
-                          type="email"
-                          placeholder="phong09829@gmail.com"
-                          value={smtpEmailInput}
-                          onChange={(e) => setSmtpEmailInput(e.target.value)}
-                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold outline-none text-slate-900 dark:text-slate-100"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                          Mật khẩu ứng dụng 16 chữ cái (App Password):
-                        </label>
-                        <input
-                          type="password"
-                          placeholder="16 chữ cái (ví dụ: abcd efgh ijkl mnop)"
-                          value={smtpPasswordInput}
-                          onChange={(e) => setSmtpPasswordInput(e.target.value)}
-                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold outline-none font-mono text-slate-900 dark:text-slate-100"
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between pt-1">
-                        <a 
-                          href="https://myaccount.google.com/apppasswords" 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="text-[11px] font-bold text-brand-600 dark:text-brand-400 hover:underline flex items-center gap-1"
-                        >
-                          <span>Lấy mã 16 chữ cái từ Google</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-
-                        <button
-                          type="button"
-                          onClick={handleSaveSmtpConfig}
-                          disabled={isSavingSmtp}
-                          className="px-3 py-1.5 rounded-xl bg-brand-600 text-white font-bold text-[11px] hover:bg-brand-500 transition cursor-pointer shadow-sm disabled:opacity-50"
-                        >
-                          {isSavingSmtp ? 'Đang lưu...' : 'Lưu Cấu Hình'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Quick test SMTP utility button */}
-                <div className="pt-1 text-center">
-                  <button
-                    type="button"
-                    onClick={handleTestSmtp}
-                    disabled={isTestingSmtp}
-                    className="text-[11px] text-slate-400 hover:text-indigo-400 transition font-medium underline cursor-pointer"
-                  >
-                    {isTestingSmtp ? 'Đang kiểm tra kết nối SMTP...' : '🔍 Thử kiểm tra gửi mail kết nối SMTP Gmail'}
-                  </button>
-                </div>
-
-                {/* Server Status Footer */}
-                <div className="pt-1 text-center text-[11px] text-slate-400 dark:text-slate-500 flex items-center justify-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${serverInfo?.status === 'ok' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-                  <span>
-                    {serverInfo?.status === 'ok' 
-                      ? (serverInfo.emailConfigured ? `Máy chủ Gmail SMTP sẵn sàng (${serverInfo.emailUser || 'Đã cấu hình'})` : 'Máy chủ Backend Online') 
-                      : 'Máy chủ Backend đang tắt (Bật start_app.bat để gửi Gmail)'}
-                  </span>
-                </div>
               </form>
             )}
 

@@ -2,9 +2,26 @@
  * Utility client-side cho tính năng Đăng nhập bằng mã OTP qua Email
  */
 
-const API_BASE_URL = typeof window !== 'undefined' && window.__FOCUSFLOW_API_URL__
-  ? window.__FOCUSFLOW_API_URL__
-  : (typeof window !== 'undefined' && window.location.protocol.startsWith('http') ? window.location.origin : 'http://localhost:5000');
+let cachedWorkingApiUrl = null;
+
+export function getApiBaseCandidates() {
+  const list = [];
+  if (cachedWorkingApiUrl) {
+    list.push(cachedWorkingApiUrl);
+  }
+  if (typeof window !== 'undefined' && window.__FOCUSFLOW_API_URL__) {
+    list.push(window.__FOCUSFLOW_API_URL__);
+  }
+  if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
+    list.push(window.location.origin);
+    if (window.location.port !== '5000') {
+      list.push(`${window.location.protocol}//${window.location.hostname}:5000`);
+    }
+  }
+  list.push('http://localhost:5000');
+  list.push('http://127.0.0.1:5000');
+  return [...new Set(list.filter(Boolean))];
+}
 
 export const OTP_STORAGE_KEYS = {
   TOKEN: 'focusflow_otp_jwt_token',
@@ -16,21 +33,26 @@ export const OTP_STORAGE_KEYS = {
  * Kiểm tra trạng thái kết nối tới Backend OTP Server
  */
 export async function checkAuthServerHealth() {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
-    const res = await fetch(`${API_BASE_URL}/api/health`, {
-      method: 'GET',
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (res.ok) {
-      return await res.json();
+  const candidates = getApiBaseCandidates();
+  for (const base of candidates) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1800);
+      const res = await fetch(`${base}/api/health`, {
+        method: 'GET',
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const data = await res.json();
+        cachedWorkingApiUrl = base;
+        return { ...data, apiUrl: base };
+      }
+    } catch (err) {
+      // thử candidate tiếp theo
     }
-    return { status: 'error', emailConfigured: false };
-  } catch (err) {
-    return { status: 'offline', emailConfigured: false };
   }
+  return { status: 'offline', emailConfigured: false };
 }
 
 /**
@@ -39,28 +61,41 @@ export async function checkAuthServerHealth() {
  */
 export async function requestEmailOtp(email) {
   const cleanEmail = (email || '').trim().toLowerCase();
-  
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const candidates = getApiBaseCandidates();
 
-    const res = await fetch(`${API_BASE_URL}/api/auth/send-otp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: cleanEmail }),
-      signal: controller.signal
-    });
+  for (const base of candidates) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
 
-    clearTimeout(timeoutId);
-    const data = await res.json();
-    return { ok: res.ok, status: res.status, ...data };
-  } catch (err) {
-    console.error('[OTP Client] Không thể kết nối tới máy chủ gửi mail', API_BASE_URL, err);
-    return {
-      ok: false,
-      message: 'Không thể kết nối đến máy chủ gửi email. Vui lòng đảm bảo bạn đã mở máy chủ (file start_app.bat)!'
-    };
+      const res = await fetch(`${base}/api/auth/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail }),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        cachedWorkingApiUrl = base;
+        return { ok: true, status: res.status, ...data };
+      }
+      if (res.status === 429) {
+        return { ok: false, message: data.message || 'Vui lòng chờ ít giây trước khi gửi lại mã.' };
+      }
+      if (data && data.message) {
+        return { ok: false, message: data.message };
+      }
+    } catch (err) {
+      // Backend tại candidate này chưa phản hồi, thử tiếp
+    }
   }
+
+  return {
+    ok: false,
+    message: 'Không thể kết nối đến máy chủ gửi email. Vui lòng đảm bảo máy chủ backend đang hoạt động!'
+  };
 }
 
 /**
@@ -72,27 +107,37 @@ export async function verifyEmailOtp(email, otp) {
   const cleanEmail = (email || '').trim().toLowerCase();
   const cleanOtp = (otp || '').trim();
 
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+  const candidates = getApiBaseCandidates();
+  for (const base of candidates) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-    const res = await fetch(`${API_BASE_URL}/api/auth/verify-otp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: cleanEmail, otp: cleanOtp }),
-      signal: controller.signal
-    });
+      const res = await fetch(`${base}/api/auth/verify-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, otp: cleanOtp }),
+        signal: controller.signal
+      });
 
-    clearTimeout(timeoutId);
-    const data = await res.json();
-    return { ok: res.ok, status: res.status, ...data };
-  } catch (err) {
-    console.error('[OTP Client] Không thể kết nối đến máy chủ xác thực', err);
-    return {
-      ok: false,
-      message: 'Không thể kết nối đến máy chủ xác thực OTP. Vui lòng kiểm tra lại kết nối mạng hoặc máy chủ!'
-    };
+      clearTimeout(timeoutId);
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        cachedWorkingApiUrl = base;
+        return { ok: true, status: res.status, ...data };
+      }
+      if (data && data.message) {
+        return { ok: false, message: data.message };
+      }
+    } catch (err) {
+      // Thử candidate tiếp theo
+    }
   }
+
+  return {
+    ok: false,
+    message: 'Mã OTP không chính xác hoặc đã hết hạn. Vui lòng kiểm tra lại!'
+  };
 }
 
 /**

@@ -3934,8 +3934,24 @@
     // =========================================================================================
     // 🔑 CẤU HÌNH GOOGLE CLIENT ID (STANDALONE HTML)
     // =========================================================================================
-    // Helper: Dynamic API Origin for Backend OTP Server
+    // Helper: Dynamic API Candidate Origins for Backend OTP Server
+    let cachedWorkingOrigin = null;
+    const getApiCandidates = () => {
+      const list = [];
+      if (cachedWorkingOrigin) list.push(cachedWorkingOrigin);
+      if (typeof window !== 'undefined' && window.__FOCUSFLOW_API_URL__) list.push(window.__FOCUSFLOW_API_URL__);
+      if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
+        list.push(window.location.origin);
+        if (window.location.port !== '5000') {
+          list.push(`${window.location.protocol}//${window.location.hostname}:5000`);
+        }
+      }
+      list.push('http://localhost:5000');
+      list.push('http://127.0.0.1:5000');
+      return [...new Set(list.filter(Boolean))];
+    };
     const getApiBase = () => {
+      if (cachedWorkingOrigin) return cachedWorkingOrigin;
       if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
         return window.location.origin;
       }
@@ -3983,19 +3999,26 @@
 
       const masterInputRef = React.useRef(null);
 
-      const checkHealth = React.useCallback(() => {
-        fetch(`${getApiBase()}/api/health`)
-          .then(res => res.json())
-          .then(data => {
-            const ok = data.status === 'ok';
-            setServerHealthy(ok);
-            setSmtpConfigured(Boolean(data.emailConfigured));
-            if (data.emailUser) setSmtpSender(data.emailUser);
-          })
-          .catch(() => {
-            setServerHealthy(false);
-            setSmtpConfigured(false);
-          });
+      const checkHealth = React.useCallback(async () => {
+        const candidates = getApiCandidates();
+        for (const base of candidates) {
+          try {
+            const controller = new AbortController();
+            const tid = setTimeout(() => controller.abort(), 1800);
+            const res = await fetch(`${base}/api/health`, { signal: controller.signal });
+            clearTimeout(tid);
+            if (res.ok) {
+              const data = await res.json();
+              cachedWorkingOrigin = base;
+              setServerHealthy(true);
+              setSmtpConfigured(Boolean(data.emailConfigured));
+              if (data.emailUser) setSmtpSender(data.emailUser);
+              return;
+            }
+          } catch(e) {}
+        }
+        setServerHealthy(false);
+        setSmtpConfigured(false);
       }, []);
 
       React.useEffect(() => {
@@ -4115,29 +4138,50 @@
         setErrorMessage(null);
         setSuccessMessage(null);
 
-        try {
-          const res = await fetch(`${getApiBase()}/api/auth/send-otp`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: cleanEmail })
-          });
-          const data = await res.json();
-          if (res.ok && data.ok) {
-            setStep('OTP');
-            setCountdown(300);
-            setResendCooldown(60);
-            setOtp('');
-            setSuccessMessage(data.message || `Mã OTP đã được gửi đến email ${cleanEmail}!`);
-            showToast(data.message || 'Mã OTP 6 số đã được gửi trực tiếp về Gmail của bạn!', 'success');
-          } else {
-            setErrorMessage(data.message || 'Không thể gửi mã OTP. Vui lòng thử lại!');
+        let sentSuccess = false;
+        const candidates = getApiCandidates();
+
+        for (const base of candidates) {
+          try {
+            const controller = new AbortController();
+            const tid = setTimeout(() => controller.abort(), 12000);
+            const res = await fetch(`${base}/api/auth/send-otp`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: cleanEmail }),
+              signal: controller.signal
+            });
+            clearTimeout(tid);
+            const data = await res.json();
+            if (res.ok && data.ok) {
+              cachedWorkingOrigin = base;
+              setStep('OTP');
+              setCountdown(300);
+              setResendCooldown(60);
+              setOtp('');
+              setSuccessMessage(data.message || `Mã OTP đã được gửi đến email ${cleanEmail}!`);
+              showToast(data.message || 'Mã OTP 6 số đã được gửi trực tiếp về Gmail của bạn!', 'success');
+              sentSuccess = true;
+              break;
+            } else if (res.status === 429) {
+              setErrorMessage(data.message || 'Vui lòng chờ ít giây trước khi gửi lại.');
+              sentSuccess = true;
+              break;
+            } else if (data && data.message) {
+              setErrorMessage(data.message);
+              sentSuccess = true;
+              break;
+            }
+          } catch (err) {
+            // Thử candidate tiếp theo
           }
-        } catch (err) {
-          setServerHealthy(false);
-          setErrorMessage('Không thể kết nối đến máy chủ gửi email. Vui lòng đảm bảo bạn đã mở máy chủ (file start_app.bat)!');
-        } finally {
-          setIsLoading(false);
         }
+
+        if (!sentSuccess) {
+          setErrorMessage('Không thể kết nối đến máy chủ gửi email. Vui lòng kiểm tra lại mạng hoặc máy chủ!');
+        }
+
+        setIsLoading(false);
       };
 
       const handleVerifyOtp = async (codeToVerify) => {
@@ -4154,29 +4198,47 @@
         setIsLoading(true);
         setErrorMessage(null);
 
-        try {
-          const cleanEmail = email.trim().toLowerCase();
-          const res = await fetch(`${getApiBase()}/api/auth/verify-otp`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: cleanEmail, otp: finalOtp })
-          });
-          const data = await res.json();
-          if (res.ok && data.ok) {
-            const name = cleanEmail.split('@')[0];
-            if (onLoginAccount) onLoginAccount({ email: cleanEmail, name });
-            else if (onRegisterAccount) onRegisterAccount({ email: cleanEmail, name });
-            if (typeof confetti === 'function') confetti({ particleCount: 90, spread: 80, origin: { y: 0.6 } });
-            showToast(`🎉 Chào mừng ${name}! Đăng nhập thành công với tài khoản ${cleanEmail}.`, 'success');
-            onClose();
-          } else {
-            setErrorMessage(data.message || 'Mã OTP không chính xác.');
+        const cleanEmail = email.trim().toLowerCase();
+
+        const candidates = getApiCandidates();
+        let verified = false;
+
+        for (const base of candidates) {
+          try {
+            const controller = new AbortController();
+            const tid = setTimeout(() => controller.abort(), 8000);
+            const res = await fetch(`${base}/api/auth/verify-otp`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: cleanEmail, otp: finalOtp }),
+              signal: controller.signal
+            });
+            clearTimeout(tid);
+            const data = await res.json();
+            if (res.ok && data.ok) {
+              cachedWorkingOrigin = base;
+              const name = cleanEmail.split('@')[0];
+              if (onLoginAccount) onLoginAccount({ email: cleanEmail, name });
+              else if (onRegisterAccount) onRegisterAccount({ email: cleanEmail, name });
+              if (typeof confetti === 'function') confetti({ particleCount: 90, spread: 80, origin: { y: 0.6 } });
+              showToast(`🎉 Chào mừng ${name}! Đăng nhập thành công với tài khoản ${cleanEmail}.`, 'success');
+              onClose();
+              verified = true;
+              break;
+            } else if (data && data.message) {
+              setErrorMessage(data.message);
+              verified = true;
+              break;
+            }
+          } catch(apiErr) {
+            // Thử tiếp
           }
-        } catch(apiErr) {
-          setErrorMessage('Không thể kết nối đến máy chủ xác thực. Vui lòng kiểm tra lại kết nối mạng hoặc máy chủ!');
-        } finally {
-          setIsLoading(false);
         }
+
+        if (!verified) {
+          setErrorMessage('Mã OTP không chính xác hoặc đã hết hạn. Vui lòng thử lại!');
+        }
+        setIsLoading(false);
       };
 
       const handleOtpInputChange = (e) => {
@@ -4260,35 +4322,25 @@
                   </div>
                 </div>
 
-                {/* Live Server Status Badge */}
-                <div className={`p-2.5 rounded-2xl text-xs flex items-center justify-between border ${
-                  serverHealthy === true
-                    ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400'
-                    : serverHealthy === false
-                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300'
-                    : 'bg-slate-100 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-500'
-                }`}>
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${
-                      serverHealthy === true ? 'bg-emerald-500 animate-pulse' : serverHealthy === false ? 'bg-amber-500' : 'bg-slate-400'
-                    }`} />
-                    <span className="font-semibold text-[11px]">
-                      {serverHealthy === true 
-                        ? (smtpConfigured ? `Gmail SMTP Sẵn Sàng (${smtpSender})` : 'Máy chủ Online') 
-                        : serverHealthy === false
-                        ? 'Máy chủ Backend đang tắt (Hãy bật start_app.bat)'
-                        : 'Đang kiểm tra kết nối...'}
-                    </span>
+                {/* Live Server Status Badge - Ẩn hoàn toàn khi offline, chỉ hiển thị trạng thái khi online */}
+                {serverHealthy === true && (
+                  <div className="p-2.5 rounded-2xl text-xs flex items-center justify-between border bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400 animate-fade-in">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="font-semibold text-[11px]">
+                        {smtpConfigured ? `Gmail SMTP Sẵn Sàng (${smtpSender})` : 'Máy chủ Online'}
+                      </span>
+                    </div>
+                    <button 
+                      type="button" 
+                      onClick={checkHealth} 
+                      className="text-[10px] underline font-bold hover:opacity-80"
+                      title="Kiểm tra lại kết nối"
+                    >
+                      Làm mới
+                    </button>
                   </div>
-                  <button 
-                    type="button" 
-                    onClick={checkHealth} 
-                    className="text-[10px] underline font-bold hover:opacity-80"
-                    title="Kiểm tra lại kết nối"
-                  >
-                    Làm mới
-                  </button>
-                </div>
+                )}
 
                 {errorMessage && (
                   <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/25 text-rose-500 dark:text-rose-400 text-xs flex items-start gap-2 animate-fade-in">
@@ -4336,7 +4388,7 @@
                     <button
                       type="submit"
                       disabled={isLoading || !email.trim()}
-                      className="w-full py-3.5 px-4 rounded-2xl btn-gradient-shimmer text-white font-extrabold text-sm shadow-xl shadow-indigo-500/25 transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+                      className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-extrabold text-sm shadow-xl shadow-indigo-500/30 hover:shadow-indigo-500/50 hover:scale-[1.01] active:scale-[0.99] transition-all duration-200 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
                     >
                       {isLoading ? (
                         <>
@@ -4347,83 +4399,6 @@
                         <span>Gửi Mã Xác Nhận 6 Số →</span>
                       )}
                     </button>
-
-                    {/* Collapsible SMTP Configuration Box */}
-                    <div className="pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setShowSmtpConfig(!showSmtpConfig)}
-                        className="w-full flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-indigo-500 transition py-1.5 px-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/60 cursor-pointer"
-                      >
-                        <span className="flex items-center gap-1.5">
-                          <span>⚙️</span>
-                          <span>Cài đặt Gmail gửi mã OTP (SMTP)</span>
-                        </span>
-                        <span>{showSmtpConfig ? '▲' : '▼'}</span>
-                      </button>
-
-                      {showSmtpConfig && (
-                        <div className="mt-2 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-3 animate-fade-in text-xs text-left">
-                          <div>
-                            <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                              Gmail của bạn (gửi mã):
-                            </label>
-                            <input
-                              type="email"
-                              placeholder="phong09829@gmail.com"
-                              value={smtpEmailInput}
-                              onChange={(e) => setSmtpEmailInput(e.target.value)}
-                              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold outline-none text-slate-900 dark:text-slate-100"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                              Mật khẩu ứng dụng 16 chữ cái (App Password):
-                            </label>
-                            <input
-                              type="password"
-                              placeholder="16 chữ cái (ví dụ: abcd efgh ijkl mnop)"
-                              value={smtpPasswordInput}
-                              onChange={(e) => setSmtpPasswordInput(e.target.value)}
-                              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold outline-none font-mono text-slate-900 dark:text-slate-100"
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between pt-1">
-                            <a 
-                              href="https://myaccount.google.com/apppasswords" 
-                              target="_blank" 
-                              rel="noreferrer"
-                              className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
-                            >
-                              <span>Lấy mã 16 chữ cái từ Google ↗</span>
-                            </a>
-
-                            <button
-                              type="button"
-                              onClick={handleSaveSmtpConfig}
-                              disabled={isSavingSmtp}
-                              className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white font-bold text-[11px] hover:bg-indigo-500 transition cursor-pointer shadow-sm disabled:opacity-50"
-                            >
-                              {isSavingSmtp ? 'Đang lưu...' : 'Lưu Cấu Hình'}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Quick test SMTP utility button */}
-                    <div className="pt-2 text-center">
-                      <button
-                        type="button"
-                        onClick={handleTestSmtp}
-                        disabled={isTestingSmtp}
-                        className="text-[11px] text-slate-400 hover:text-indigo-400 transition font-medium underline"
-                      >
-                        {isTestingSmtp ? 'Đang kiểm tra kết nối SMTP...' : '🔍 Thử kiểm tra gửi mail kết nối SMTP Gmail'}
-                      </button>
-                    </div>
                   </form>
                 ) : (
                   <div className="space-y-4 pt-1">

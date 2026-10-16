@@ -1,16 +1,11 @@
 @echo off
-chcp 65001 > nul
-title FocusFlow - Trình Quản Lý Thời Gian & Đăng Nhập OTP Email
-cls
-echo =======================================================================
-echo          ⏱️ FOCUSFLOW - QUẢN LÝ THỜI GIAN & ĐĂNG NHẬP OTP EMAIL
-echo =======================================================================
-echo.
-echo [*] Đang khởi động Máy chủ Backend (Python Unified Server)...
-echo [*] Trình duyệt web sẽ tự động mở tại: http://localhost:5000
-echo.
-echo Bạn có thể thu nhỏ cửa sổ này lại khi đang sử dụng ứng dụng.
-echo Để tắt máy chủ, đóng cửa sổ này hoặc nhấn tổ hợp phím Ctrl + C.
-echo =======================================================================
-python server.py
-pause
+title FocusFlow - Quan Ly Thoi Gian va Dang Nhap OTP
+echo [*] Dang kiem tra may chu Backend (Port 5000)...
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$conn = Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue; if (-not $conn) { Start-Process 'wscript.exe' -ArgumentList '\"%~dp0start_server_background.vbs\"'; Start-Sleep -Milliseconds 900 }"
+
+echo [*] May chu Backend da san sang!
+echo [*] Dang mo trinh duyet tai http://localhost:5000 ...
+start "" "http://localhost:5000"
+
+timeout /t 2 > nul
