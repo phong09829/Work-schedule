@@ -4,6 +4,15 @@ import crypto from 'crypto';
 // In-Memory store for Serverless warm invocations
 const otpStore = globalThis.__ff_otp_store || (globalThis.__ff_otp_store = new Map());
 
+// Stateless HMAC secret key for cross-lambda OTP verification
+const OTP_SECRET = process.env.OTP_SECRET || process.env.JWT_SECRET || 'focusflow_stateless_otp_secret_key_2026_xyz';
+
+function createOtpSignature(email, otp, expiresAt) {
+  const payload = `${email}:${otp}:${expiresAt}`;
+  const hmac = crypto.createHmac('sha256', OTP_SECRET).update(payload).digest('hex');
+  return `${expiresAt}.${hmac}`;
+}
+
 // Secure base64 fallback to prevent GitHub secret scanners while keeping Vercel plug-and-play
 const DEFAULT_USER = Buffer.from('cGhvbmcwOTgyOUBnbWFpbC5jb20=', 'base64').toString('utf-8');
 const DEFAULT_PASS = Buffer.from('aWdsY3BxbGdkaGJmeW15ZQ==', 'base64').toString('utf-8');
@@ -43,6 +52,7 @@ export default async function handler(req, res) {
   // Generate real 6-digit OTP
   const otpCode = crypto.randomInt(100000, 999999).toString();
   const expiresAt = now + 5 * 60 * 1000;
+  const otpSign = createOtpSignature(cleanEmail, otpCode, expiresAt);
 
   otpStore.set(cleanEmail, {
     code: otpCode,
@@ -148,7 +158,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       message: `Mã OTP 6 số đã được gửi tới ${cleanEmail}. Vui lòng kiểm tra hộp thư!`,
-      expiresIn: 300
+      expiresIn: 300,
+      otpSign
     });
   } else {
     return res.status(500).json({

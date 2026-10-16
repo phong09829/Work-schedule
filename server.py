@@ -17,6 +17,8 @@ import time
 import secrets
 import smtplib
 import ssl
+import hmac
+import hashlib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from urllib.parse import urlparse
@@ -41,6 +43,35 @@ def safe_log(msg):
 PORT = int(os.environ.get("PORT", 5000))
 EMAIL_USER = os.environ.get("EMAIL_USER", "")
 EMAIL_APP_PASSWORD = os.environ.get("EMAIL_APP_PASSWORD", "").replace(" ", "")
+
+OTP_SECRET = os.environ.get("OTP_SECRET") or os.environ.get("JWT_SECRET") or "focusflow_stateless_otp_secret_key_2026_xyz"
+
+def make_otp_sign(email: str, otp: str, expires_at: int) -> str:
+    payload = f"{email}:{otp}:{expires_at}".encode('utf-8')
+    sig = hmac.new(OTP_SECRET.encode('utf-8'), payload, hashlib.sha256).hexdigest()
+    return f"{expires_at}.{sig}"
+
+def verify_otp_signature(email: str, otp: str, otp_sign: str):
+    if not otp_sign or not isinstance(otp_sign, str):
+        return False, "missing_sign"
+    parts = otp_sign.split(".")
+    if len(parts) != 2:
+        return False, "invalid_format"
+    exp_str, sig = parts
+    try:
+        exp_time = int(exp_str)
+    except Exception:
+        return False, "invalid_exp"
+
+    now_ms = int(time.time() * 1000)
+    exp_ms = exp_time * 1000 if exp_time < 10000000000 else exp_time
+    if now_ms > exp_ms:
+        return False, "Mã OTP đã hết hạn (quá 5 phút). Vui lòng yêu cầu mã mới!"
+
+    expected_sig = hmac.new(OTP_SECRET.encode('utf-8'), f"{email}:{otp}:{exp_str}".encode('utf-8'), hashlib.sha256).hexdigest()
+    if hmac.compare_digest(sig, expected_sig):
+        return True, "valid"
+    return False, "Mã OTP không chính xác. Vui lòng kiểm tra lại!"
 
 # In-Memory OTP Store: { email: { "code": "123456", "expires_at": timestamp, "attempts": 0, "created_at": timestamp } }
 OTP_STORE = {}
@@ -235,6 +266,8 @@ class UnifiedHandler(http.server.SimpleHTTPRequestHandler):
             # Generate 6-digit OTP
             otp_code = f"{secrets.randbelow(900000) + 100000}"
             expires_at = now + 300  # 5 phút
+            expires_at_ms = int(expires_at * 1000)
+            otp_sign = make_otp_sign(email, otp_code, expires_at_ms)
 
             OTP_STORE[email] = {
                 "code": otp_code,
@@ -252,6 +285,7 @@ class UnifiedHandler(http.server.SimpleHTTPRequestHandler):
                     "ok": True,
                     "message": f"Mã OTP 6 số đã được gửi tới {email}. Vui lòng kiểm tra hộp thư!",
                     "expiresIn": 300,
+                    "otpSign": otp_sign,
                     "mode": "smtp_sent"
                 })
             else:
@@ -265,6 +299,7 @@ class UnifiedHandler(http.server.SimpleHTTPRequestHandler):
         elif parsed.path == "/api/auth/verify-otp":
             email = (body.get("email") or "").strip().lower()
             otp = (body.get("otp") or "").strip()
+            otp_sign = (body.get("otpSign") or "").strip()
 
             if not is_valid_email(email):
                 return self._send_json(400, {"ok": False, "message": "Địa chỉ email không hợp lệ!"})
@@ -272,27 +307,45 @@ class UnifiedHandler(http.server.SimpleHTTPRequestHandler):
             if len(otp) != 6:
                 return self._send_json(400, {"ok": False, "message": "Mã OTP phải bao gồm đúng 6 chữ số!"})
 
-            record = OTP_STORE.get(email)
-            now = time.time()
+            is_valid = False
 
-            if not record:
+            # 1. Kiểm tra qua Stateless HMAC Signature
+            if otp_sign:
+                ok, reason = verify_otp_signature(email, otp, otp_sign)
+                if ok:
+                    is_valid = True
+                elif "hết hạn" in reason:
+                    return self._send_json(400, {"ok": False, "message": reason})
+                elif email not in OTP_STORE:
+                    return self._send_json(400, {"ok": False, "message": reason})
+
+            # 2. Fallback kiểm tra qua In-Memory Store
+            if not is_valid:
+                record = OTP_STORE.get(email)
+                now = time.time()
+
+                if record:
+                    if now > record["expires_at"]:
+                        del OTP_STORE[email]
+                        return self._send_json(400, {"ok": False, "message": "Mã OTP đã hết hạn (quá 5 phút). Vui lòng yêu cầu mã mới!"})
+
+                    if record["attempts"] >= 5:
+                        del OTP_STORE[email]
+                        return self._send_json(400, {"ok": False, "message": "Bạn đã nhập sai quá 5 lần. Mã này đã bị vô hiệu hóa vì lý do bảo mật!"})
+
+                    if record["code"] != otp:
+                        record["attempts"] += 1
+                        rem = 5 - record["attempts"]
+                        return self._send_json(400, {"ok": False, "message": f"Mã OTP không chính xác. Bạn còn {rem} lần thử!"})
+
+                    is_valid = True
+
+            if not is_valid:
                 return self._send_json(400, {"ok": False, "message": "Không tìm thấy yêu cầu OTP hoặc mã đã hết hạn. Vui lòng bấm gửi lại mã!"})
 
-            if now > record["expires_at"]:
-                del OTP_STORE[email]
-                return self._send_json(400, {"ok": False, "message": "Mã OTP đã hết hạn (quá 5 phút). Vui lòng yêu cầu mã mới!"})
-
-            if record["attempts"] >= 5:
-                del OTP_STORE[email]
-                return self._send_json(400, {"ok": False, "message": "Bạn đã nhập sai quá 5 lần. Mã này đã bị vô hiệu hóa vì lý do bảo mật!"})
-
-            if record["code"] != otp:
-                record["attempts"] += 1
-                rem = 5 - record["attempts"]
-                return self._send_json(400, {"ok": False, "message": f"Mã OTP không chính xác. Bạn còn {rem} lần thử!"})
-
             # Valid! Consume OTP
-            del OTP_STORE[email]
+            if email in OTP_STORE:
+                del OTP_STORE[email]
 
             name = email.split("@")[0]
             avatar = f"https://api.dicebear.com/7.x/bottts/svg?seed={email}"

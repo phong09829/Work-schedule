@@ -79,6 +79,11 @@ export async function requestEmailOtp(email) {
       const data = await res.json();
       if (res.ok && data.ok) {
         cachedWorkingApiUrl = base;
+        if (data.otpSign && typeof window !== 'undefined') {
+          try {
+            sessionStorage.setItem('ff_otp_sign_' + cleanEmail, data.otpSign);
+          } catch (e) {}
+        }
         return { ok: true, status: res.status, ...data };
       }
       if (res.status === 429) {
@@ -102,10 +107,18 @@ export async function requestEmailOtp(email) {
  * Xác thực mã OTP 6 số và nhận JWT token
  * @param {string} email
  * @param {string} otp
+ * @param {string} [otpSign]
  */
-export async function verifyEmailOtp(email, otp) {
+export async function verifyEmailOtp(email, otp, otpSign) {
   const cleanEmail = (email || '').trim().toLowerCase();
   const cleanOtp = (otp || '').trim();
+
+  let finalSign = otpSign;
+  if (!finalSign && typeof window !== 'undefined') {
+    try {
+      finalSign = sessionStorage.getItem('ff_otp_sign_' + cleanEmail) || '';
+    } catch (e) {}
+  }
 
   const candidates = getApiBaseCandidates();
   for (const base of candidates) {
@@ -116,7 +129,7 @@ export async function verifyEmailOtp(email, otp) {
       const res = await fetch(`${base}/api/auth/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, otp: cleanOtp }),
+        body: JSON.stringify({ email: cleanEmail, otp: cleanOtp, otpSign: finalSign }),
         signal: controller.signal
       });
 
@@ -124,6 +137,11 @@ export async function verifyEmailOtp(email, otp) {
       const data = await res.json();
       if (res.ok && data.ok) {
         cachedWorkingApiUrl = base;
+        if (typeof window !== 'undefined') {
+          try {
+            sessionStorage.removeItem('ff_otp_sign_' + cleanEmail);
+          } catch (e) {}
+        }
         return { ok: true, status: res.status, ...data };
       }
       if (data && data.message) {

@@ -4155,6 +4155,9 @@
             const data = await res.json();
             if (res.ok && data.ok) {
               cachedWorkingOrigin = base;
+              if (data.otpSign) {
+                try { sessionStorage.setItem('ff_otp_sign_' + cleanEmail, data.otpSign); } catch (e) {}
+              }
               setStep('OTP');
               setCountdown(300);
               setResendCooldown(60);
@@ -4199,6 +4202,8 @@
         setErrorMessage(null);
 
         const cleanEmail = email.trim().toLowerCase();
+        let otpSign = '';
+        try { otpSign = sessionStorage.getItem('ff_otp_sign_' + cleanEmail) || ''; } catch (e) {}
 
         const candidates = getApiCandidates();
         let verified = false;
@@ -4210,13 +4215,14 @@
             const res = await fetch(`${base}/api/auth/verify-otp`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: cleanEmail, otp: finalOtp }),
+              body: JSON.stringify({ email: cleanEmail, otp: finalOtp, otpSign }),
               signal: controller.signal
             });
             clearTimeout(tid);
             const data = await res.json();
             if (res.ok && data.ok) {
               cachedWorkingOrigin = base;
+              try { sessionStorage.removeItem('ff_otp_sign_' + cleanEmail); } catch (e) {}
               const name = cleanEmail.split('@')[0];
               if (onLoginAccount) onLoginAccount({ email: cleanEmail, name });
               else if (onRegisterAccount) onRegisterAccount({ email: cleanEmail, name });

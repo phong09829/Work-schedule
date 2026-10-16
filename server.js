@@ -30,6 +30,41 @@ app.use(express.json());
 // Structure: Map<email, { code: string, expiresAt: number, attempts: number, createdAt: number }>
 const otpStore = new Map();
 
+const OTP_SECRET = process.env.OTP_SECRET || process.env.JWT_SECRET || 'focusflow_stateless_otp_secret_key_2026_xyz';
+
+function createOtpSignature(email, otp, expiresAt) {
+  const payload = `${email}:${otp}:${expiresAt}`;
+  const hmac = crypto.createHmac('sha256', OTP_SECRET).update(payload).digest('hex');
+  return `${expiresAt}.${hmac}`;
+}
+
+function verifyOtpSignature(email, otp, otpSign) {
+  if (!otpSign || typeof otpSign !== 'string') return { valid: false, reason: 'missing_sign' };
+  const parts = otpSign.split('.');
+  if (parts.length !== 2) return { valid: false, reason: 'invalid_format' };
+
+  const [expStr, signature] = parts;
+  const expiresAt = parseInt(expStr, 10);
+  if (isNaN(expiresAt)) return { valid: false, reason: 'invalid_exp' };
+
+  const now = Date.now();
+  const expMs = expiresAt < 10000000000 ? expiresAt * 1000 : expiresAt;
+  if (now > expMs) {
+    return { valid: false, expired: true, reason: 'Mã OTP đã hết hạn (quá 5 phút). Vui lòng yêu cầu mã mới!' };
+  }
+
+  const payload = `${email}:${otp}:${expStr}`;
+  const expectedHmac = crypto.createHmac('sha256', OTP_SECRET).update(payload).digest('hex');
+
+  const sigBuf = Buffer.from(signature);
+  const expBuf = Buffer.from(expectedHmac);
+
+  if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
+    return { valid: true };
+  }
+  return { valid: false, reason: 'Mã OTP không chính xác. Vui lòng kiểm tra lại!' };
+}
+
 // Helper to validate email format
 const isValidEmail = (email) => {
   if (!email || typeof email !== 'string') return false;
@@ -173,6 +208,8 @@ app.post('/api/auth/send-otp', async (req, res) => {
     
     // Lưu tạm thời mã OTP với thời hạn 5 phút (300,000 ms)
     const expiresAt = Date.now() + 5 * 60 * 1000;
+    const otpSign = createOtpSignature(cleanEmail, otpCode, expiresAt);
+
     otpStore.set(cleanEmail, {
       code: otpCode,
       expiresAt,
@@ -199,6 +236,7 @@ app.post('/api/auth/send-otp', async (req, res) => {
           ok: true,
           message: `Mã OTP 6 chữ số đã được gửi tới email ${cleanEmail}. Vui lòng kiểm tra hòm thư (kể cả mục Spam)!`,
           expiresIn: 300, // 5 phút
+          otpSign,
           mode: 'smtp_sent'
         });
       } catch (mailError) {
@@ -228,11 +266,11 @@ app.post('/api/auth/send-otp', async (req, res) => {
 // =========================================================================================
 // API 2: KIỂM TRA MÃ OTP VÀ TẠO PHIÊN ĐĂNG NHẬP / JWT TOKEN
 // POST /api/auth/verify-otp
-// Body: { email, otp }
+// Body: { email, otp, otpSign }
 // =========================================================================================
 app.post('/api/auth/verify-otp', async (req, res) => {
   try {
-    const { email, otp } = req.body;
+    const { email, otp, otpSign } = req.body;
 
     if (!email || !isValidEmail(email)) {
       return res.status(400).json({
@@ -251,45 +289,61 @@ app.post('/api/auth/verify-otp', async (req, res) => {
     const cleanEmail = normalizeEmail(email);
     const inputOtp = otp.trim();
 
-    const record = otpStore.get(cleanEmail);
+    let isValid = false;
 
-    // 1. Kiểm tra mã có tồn tại không
-    if (!record) {
+    // 1. Kiểm tra qua Stateless HMAC Signature
+    if (otpSign) {
+      const signResult = verifyOtpSignature(cleanEmail, inputOtp, otpSign);
+      if (signResult.valid) {
+        isValid = true;
+      } else if (signResult.expired) {
+        return res.status(400).json({ ok: false, message: signResult.reason });
+      } else if (!otpStore.has(cleanEmail)) {
+        return res.status(400).json({ ok: false, message: signResult.reason || 'Mã OTP không chính xác. Vui lòng kiểm tra lại!' });
+      }
+    }
+
+    // 2. Fallback kiểm tra qua In-Memory Store
+    if (!isValid) {
+      const record = otpStore.get(cleanEmail);
+      if (record) {
+        if (Date.now() > record.expiresAt) {
+          otpStore.delete(cleanEmail);
+          return res.status(400).json({
+            ok: false,
+            message: 'Mã OTP đã hết hạn (quá 5 phút). Vui lòng yêu cầu mã mới!'
+          });
+        }
+
+        if (record.attempts >= 5) {
+          otpStore.delete(cleanEmail);
+          return res.status(400).json({
+            ok: false,
+            message: 'Bạn đã nhập sai quá 5 lần. Mã này đã bị vô hiệu hóa vì lý do bảo mật. Vui lòng yêu cầu mã mới!'
+          });
+        }
+
+        if (record.code !== inputOtp) {
+          record.attempts += 1;
+          const remainingAttempts = 5 - record.attempts;
+          return res.status(400).json({
+            ok: false,
+            message: `Mã OTP không chính xác. Bạn còn ${remainingAttempts} lần thử!`
+          });
+        }
+
+        isValid = true;
+      }
+    }
+
+    if (!isValid) {
       return res.status(400).json({
         ok: false,
         message: 'Không tìm thấy yêu cầu OTP cho email này hoặc mã đã hết hạn. Vui lòng bấm "Gửi lại mã"!'
       });
     }
 
-    // 2. Kiểm tra thời hạn 5 phút
-    if (Date.now() > record.expiresAt) {
-      otpStore.delete(cleanEmail);
-      return res.status(400).json({
-        ok: false,
-        message: 'Mã OTP đã hết hạn (quá 5 phút). Vui lòng yêu cầu mã mới!'
-      });
-    }
-
-    // 3. Kiểm tra số lần nhập sai (chặn brute-force)
-    if (record.attempts >= 5) {
-      otpStore.delete(cleanEmail);
-      return res.status(400).json({
-        ok: false,
-        message: 'Bạn đã nhập sai quá 5 lần. Mã này đã bị vô hiệu hóa vì lý do bảo mật. Vui lòng yêu cầu mã mới!'
-      });
-    }
-
-    // 4. So khớp mã OTP
-    if (record.code !== inputOtp) {
-      record.attempts += 1;
-      const remainingAttempts = 5 - record.attempts;
-      return res.status(400).json({
-        ok: false,
-        message: `Mã OTP không chính xác. Bạn còn ${remainingAttempts} lần thử!`
-      });
-    }
-
-    // 5. OTP hợp lệ! Xóa OTP đã sử dụng để chống dùng lại (Replay Attack)
+    // Xóa khỏi store
     otpStore.delete(cleanEmail);
 
     // 6. Tạo JWT token và thông tin người dùng

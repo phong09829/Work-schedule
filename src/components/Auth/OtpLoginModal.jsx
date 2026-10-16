@@ -32,6 +32,7 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
   const [step, setStep] = useState('EMAIL');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
+  const [otpSign, setOtpSign] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
   const [serverInfo, setServerInfo] = useState(null);
@@ -191,6 +192,7 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
     try {
       const res = await requestEmailOtp(cleanEmail);
       if (res.ok) {
+        if (res.otpSign) setOtpSign(res.otpSign);
         setStep('OTP');
         setCountdown(300); // 5 phút
         setResendCooldown(60); // 60s cooldown
@@ -253,7 +255,7 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
     setErrorMessage(null);
 
     try {
-      const res = await verifyEmailOtp(email, finalOtp);
+      const res = await verifyEmailOtp(email, finalOtp, otpSign);
 
       if (res.ok) {
         if (loginWithOtpSession) {
