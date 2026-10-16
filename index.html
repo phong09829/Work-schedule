@@ -3974,7 +3974,6 @@
       const [serverHealthy, setServerHealthy] = React.useState(null); // null = checking, true = online, false = offline
       const [smtpConfigured, setSmtpConfigured] = React.useState(false);
       const [smtpSender, setSmtpSender] = React.useState('');
-      const [fallbackCode, setFallbackCode] = React.useState(null);
       const [isTestingSmtp, setIsTestingSmtp] = React.useState(false);
       const [testResult, setTestResult] = React.useState(null);
       const [showSmtpConfig, setShowSmtpConfig] = React.useState(false);
@@ -4007,7 +4006,6 @@
         if (!isAccountLoggedIn) {
           setStep('EMAIL');
           setOtp('');
-          setFallbackCode(null);
         }
         checkHealth();
       }, [isOpen, isAccountLoggedIn, checkHealth]);
@@ -4129,23 +4127,14 @@
             setCountdown(300);
             setResendCooldown(60);
             setOtp('');
-            setFallbackCode(null);
             setSuccessMessage(data.message || `Mã OTP đã được gửi đến email ${cleanEmail}!`);
-            showToast(data.message || 'Mã OTP đã được gửi về Gmail của bạn!', 'success');
+            showToast(data.message || 'Mã OTP 6 số đã được gửi trực tiếp về Gmail của bạn!', 'success');
           } else {
-            setErrorMessage(data.message || 'Không thể gửi mã OTP.');
+            setErrorMessage(data.message || 'Không thể gửi mã OTP. Vui lòng thử lại!');
           }
         } catch (err) {
-          // Backend offline fallback mode
-          const demoCode = Math.floor(100000 + Math.random() * 900000).toString();
-          sessionStorage.setItem('standalone_otp_' + cleanEmail, JSON.stringify({ code: demoCode, exp: Date.now() + 300000 }));
-          setStep('OTP');
-          setCountdown(300);
-          setResendCooldown(60);
-          setOtp('');
-          setFallbackCode(demoCode);
           setServerHealthy(false);
-          showToast('Chế độ thử nghiệm offline đã kích hoạt!', 'info');
+          setErrorMessage('Không thể kết nối đến máy chủ gửi email. Vui lòng đảm bảo bạn đã mở máy chủ (file start_app.bat)!');
         } finally {
           setIsLoading(false);
         }
@@ -4167,43 +4156,24 @@
 
         try {
           const cleanEmail = email.trim().toLowerCase();
-          let verified = false;
-
-          try {
-            const res = await fetch(`${getApiBase()}/api/auth/verify-otp`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: cleanEmail, otp: finalOtp })
-            });
-            const data = await res.json();
-            if (res.ok && data.ok) {
-              verified = true;
-            } else {
-              setErrorMessage(data.message || 'Mã OTP không chính xác.');
-            }
-          } catch(apiErr) {
-            const raw = sessionStorage.getItem('standalone_otp_' + cleanEmail);
-            if (raw) {
-              const stored = JSON.parse(raw);
-              if (Date.now() <= stored.exp && stored.code === finalOtp) {
-                verified = true;
-                sessionStorage.removeItem('standalone_otp_' + cleanEmail);
-              } else {
-                setErrorMessage('Mã OTP không chính xác hoặc đã hết hạn.');
-              }
-            } else {
-              setErrorMessage('Không thể kết nối đến máy chủ xác thực.');
-            }
-          }
-
-          if (verified) {
+          const res = await fetch(`${getApiBase()}/api/auth/verify-otp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: cleanEmail, otp: finalOtp })
+          });
+          const data = await res.json();
+          if (res.ok && data.ok) {
             const name = cleanEmail.split('@')[0];
             if (onLoginAccount) onLoginAccount({ email: cleanEmail, name });
             else if (onRegisterAccount) onRegisterAccount({ email: cleanEmail, name });
             if (typeof confetti === 'function') confetti({ particleCount: 90, spread: 80, origin: { y: 0.6 } });
             showToast(`🎉 Chào mừng ${name}! Đăng nhập thành công với tài khoản ${cleanEmail}.`, 'success');
             onClose();
+          } else {
+            setErrorMessage(data.message || 'Mã OTP không chính xác.');
           }
+        } catch(apiErr) {
+          setErrorMessage('Không thể kết nối đến máy chủ xác thực. Vui lòng kiểm tra lại kết nối mạng hoặc máy chủ!');
         } finally {
           setIsLoading(false);
         }
@@ -4457,42 +4427,16 @@
                   </form>
                 ) : (
                   <div className="space-y-4 pt-1">
-                    {/* Fallback code banner if backend is offline */}
-                    {fallbackCode && (
-                      <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-amber-300">⚠️ Chế độ Thử Nghiệm Offline</span>
-                          <span className="font-mono font-black text-sm bg-amber-500/20 px-2.5 py-1 rounded-xl text-amber-300 tracking-wider">
-                            {fallbackCode}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-amber-300/80 leading-relaxed">
-                          Máy chủ Backend chưa được bật nên mã chưa thể gửi về Gmail thật. Để gửi mã thật về hòm thư Gmail, hãy chạy file <strong>start_app.bat</strong>!
+                    {/* Sent OTP notice */}
+                    <div className="p-3.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs flex items-start gap-2.5">
+                      <span className="text-lg leading-none shrink-0">📬</span>
+                      <div className="leading-relaxed">
+                        <span className="font-bold text-indigo-200">Đã gửi mã xác thực tới Gmail!</span>
+                        <p className="text-[11px] text-indigo-300/80 mt-0.5">
+                          Mã xác nhận 6 số đã được gửi trực tiếp đến <strong className="font-mono text-indigo-200">{email}</strong>. Vui lòng kiểm tra Hộp thư đến (hoặc mục <strong>Thư rác / Spam</strong>).
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setOtp(fallbackCode);
-                            handleVerifyOtp(fallbackCode);
-                          }}
-                          className="w-full py-2 px-3 rounded-xl bg-amber-500/25 hover:bg-amber-500/35 text-amber-200 font-bold text-xs transition border border-amber-500/30"
-                        >
-                          ⚡ Bấm để tự động điền mã {fallbackCode} & Đăng nhập ngay
-                        </button>
                       </div>
-                    )}
-
-                    {!fallbackCode && (
-                      <div className="p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs flex items-start gap-2.5">
-                        <span className="text-base leading-none">📬</span>
-                        <div className="leading-relaxed">
-                          <span className="font-bold text-indigo-200">Đã gửi mã xác thực tới Gmail!</span>
-                          <p className="text-[11px] text-indigo-300/80 mt-0.5">
-                            Vui lòng kiểm tra Hộp thư đến (hoặc mục <strong>Thư rác / Spam</strong>).
-                          </p>
-                        </div>
-                      </div>
-                    )}
+                    </div>
 
                     <div className="flex justify-between items-center text-xs">
                       <span className="font-bold text-slate-700 dark:text-slate-300">Nhập mã 6 chữ số</span>

@@ -55,23 +55,10 @@ export async function requestEmailOtp(email) {
     const data = await res.json();
     return { ok: res.ok, status: res.status, ...data };
   } catch (err) {
-    console.warn('[OTP Client] Server offline hoặc không thể kết nối tới', API_BASE_URL, err);
-    
-    // Client-side local sandbox fallback if backend is not yet started:
-    const fallbackOtp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 5 * 60 * 1000;
-    
-    sessionStorage.setItem(`demo_otp_${cleanEmail}`, JSON.stringify({
-      code: fallbackOtp,
-      expiresAt
-    }));
-
+    console.error('[OTP Client] Không thể kết nối tới máy chủ gửi mail', API_BASE_URL, err);
     return {
-      ok: true,
-      mode: 'client_fallback',
-      fallbackCode: fallbackOtp,
-      message: `Máy chủ Backend chưa bật (chưa gửi email thật). Mã thử nghiệm offline là: ${fallbackOtp}`,
-      expiresIn: 300
+      ok: false,
+      message: 'Không thể kết nối đến máy chủ gửi email. Vui lòng đảm bảo bạn đã mở máy chủ (file start_app.bat)!'
     };
   }
 }
@@ -100,44 +87,10 @@ export async function verifyEmailOtp(email, otp) {
     const data = await res.json();
     return { ok: res.ok, status: res.status, ...data };
   } catch (err) {
-    console.warn('[OTP Client] Kiểm tra fallback cho local demo sandbox', err);
-    
-    // Client fallback check
-    const raw = sessionStorage.getItem(`demo_otp_${cleanEmail}`);
-    if (raw) {
-      try {
-        const stored = JSON.parse(raw);
-        if (Date.now() > stored.expiresAt) {
-          sessionStorage.removeItem(`demo_otp_${cleanEmail}`);
-          return { ok: false, message: 'Mã OTP đã hết hạn (quá 5 phút). Vui lòng gửi lại mã mới!' };
-        }
-        if (stored.code === cleanOtp) {
-          sessionStorage.removeItem(`demo_otp_${cleanEmail}`);
-          const name = cleanEmail.split('@')[0];
-          const avatar = `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanEmail}`;
-          return {
-            ok: true,
-            message: `Xác thực thành công! Chào mừng ${name}.`,
-            token: `demo_jwt_${Date.now()}`,
-            user: {
-              id: `usr-${Date.now()}`,
-              email: cleanEmail,
-              name,
-              avatar,
-              authProvider: 'email_otp'
-            }
-          };
-        } else {
-          return { ok: false, message: 'Mã OTP không chính xác. Vui lòng kiểm tra lại!' };
-        }
-      } catch (e) {
-        // pass
-      }
-    }
-
+    console.error('[OTP Client] Không thể kết nối đến máy chủ xác thực', err);
     return {
       ok: false,
-      message: 'Không thể kết nối đến máy chủ xác thực. Vui lòng bật server backend (node server.js hoặc python server.py)!'
+      message: 'Không thể kết nối đến máy chủ xác thực OTP. Vui lòng kiểm tra lại kết nối mạng hoặc máy chủ!'
     };
   }
 }

@@ -43,7 +43,6 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
   const [isSavingSmtp, setIsSavingSmtp] = useState(false);
   const [isTestingSmtp, setIsTestingSmtp] = useState(false);
   const [testResult, setTestResult] = useState(null);
-  const [fallbackCode, setFallbackCode] = useState(null);
 
   // Expiration countdown (5 minutes = 300s)
   const [countdown, setCountdown] = useState(300);
@@ -62,7 +61,6 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
       if (!isAccountLoggedIn) {
         setStep('EMAIL');
         setOtp('');
-        setFallbackCode(null);
       }
     }
   }, [isOpen, isAccountLoggedIn]);
@@ -197,13 +195,7 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
         setCountdown(300); // 5 phút
         setResendCooldown(60); // 60s cooldown
         setOtp('');
-        if (res.fallbackCode) {
-          setFallbackCode(res.fallbackCode);
-        } else {
-          setFallbackCode(null);
-        }
-
-        showToast(res.message || 'Mã OTP đã được gửi đến email của bạn!', 'success', 5000);
+        showToast(res.message || 'Mã OTP 6 số đã được gửi trực tiếp đến Gmail của bạn!', 'success', 5000);
       } else {
         setErrorMessage(res.message || 'Không thể gửi mã OTP. Vui lòng thử lại!');
       }
@@ -540,40 +532,16 @@ export const OtpLoginModal = ({ isOpen, onClose }) => {
             {/* ------------------------------------------------------------- */}
             {step === 'OTP' && (
               <div className="space-y-5 animate-fade-in">
-                {/* Fallback code banner if backend is offline */}
-                {fallbackCode ? (
-                  <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-200 text-xs space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-amber-600 dark:text-amber-300">⚠️ Chế độ Thử Nghiệm Offline</span>
-                      <span className="font-mono font-black text-sm bg-amber-500/20 px-2.5 py-1 rounded-xl text-amber-800 dark:text-amber-300 tracking-wider">
-                        {fallbackCode}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-amber-700/80 dark:text-amber-300/80 leading-relaxed">
-                      Máy chủ Backend chưa được bật nên mã chưa thể gửi về Gmail thật. Để gửi mã thật về hòm thư Gmail, hãy chạy file <strong>start_app.bat</strong>!
+                {/* Sent OTP notice */}
+                <div className="p-3.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-700 dark:text-indigo-300 text-xs flex items-start gap-2.5">
+                  <span className="text-lg leading-none shrink-0">📬</span>
+                  <div className="leading-relaxed">
+                    <span className="font-bold text-indigo-700 dark:text-indigo-200">Đã gửi mã xác thực tới Gmail!</span>
+                    <p className="text-[11px] text-indigo-600/80 dark:text-indigo-300/80 mt-0.5">
+                      Mã xác nhận 6 số đã được gửi trực tiếp đến <strong className="font-mono text-slate-800 dark:text-slate-100">{email}</strong>. Vui lòng kiểm tra Hộp thư đến (hoặc mục <strong>Thư rác / Spam</strong>).
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOtp(fallbackCode);
-                        handleVerifyOtp(fallbackCode);
-                      }}
-                      className="w-full py-2 px-3 rounded-xl bg-amber-500/25 hover:bg-amber-500/35 text-amber-800 dark:text-amber-200 font-bold text-xs transition border border-amber-500/30 cursor-pointer"
-                    >
-                      ⚡ Bấm để tự động điền mã {fallbackCode} & Đăng nhập ngay
-                    </button>
                   </div>
-                ) : (
-                  <div className="p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-700 dark:text-indigo-300 text-xs flex items-start gap-2.5">
-                    <span className="text-base leading-none">📬</span>
-                    <div className="leading-relaxed">
-                      <span className="font-bold text-indigo-700 dark:text-indigo-200">Đã gửi mã xác thực tới Gmail!</span>
-                      <p className="text-[11px] text-indigo-600/80 dark:text-indigo-300/80 mt-0.5">
-                        Vui lòng kiểm tra Hộp thư đến (hoặc mục <strong>Thư rác / Spam</strong>).
-                      </p>
-                    </div>
-                  </div>
-                )}
+                </div>
                 
                 {/* 6 Visual Digit Cells with Master Input Overlay */}
                 <div className="space-y-2">
