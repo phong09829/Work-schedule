@@ -4328,25 +4328,7 @@
                   </div>
                 </div>
 
-                {/* Live Server Status Badge - Ẩn hoàn toàn khi offline, chỉ hiển thị trạng thái khi online */}
-                {serverHealthy === true && (
-                  <div className="p-2.5 rounded-2xl text-xs flex items-center justify-between border bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400 animate-fade-in">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      <span className="font-semibold text-[11px]">
-                        {smtpConfigured ? `Gmail SMTP Sẵn Sàng (${smtpSender})` : 'Máy chủ Online'}
-                      </span>
-                    </div>
-                    <button 
-                      type="button" 
-                      onClick={checkHealth} 
-                      className="text-[10px] underline font-bold hover:opacity-80"
-                      title="Kiểm tra lại kết nối"
-                    >
-                      Làm mới
-                    </button>
-                  </div>
-                )}
+                {/* Phần trạng thái 'Gmail SMTP Sẵn Sàng' đã được ẩn theo yêu cầu */}
 
                 {errorMessage && (
                   <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/25 text-rose-500 dark:text-rose-400 text-xs flex items-start gap-2 animate-fade-in">
