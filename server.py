@@ -205,6 +205,12 @@ class UnifiedHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=BASE_DIR, **kwargs)
 
+    def log_message(self, format, *args):
+        try:
+            safe_log(f"{self.address_string()} - - [{self.log_date_time_string()}] {format % args}")
+        except Exception:
+            pass
+
     def _send_cors_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
