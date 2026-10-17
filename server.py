@@ -26,6 +26,12 @@ from urllib.parse import urlparse
 import email.utils
 from email.header import Header
 
+# Đảm bảo stdout/stderr không bao giờ là None khi chạy ngầm bằng pythonw.exe
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 # Reconfigure stdout/stderr for Unicode support on Windows
 if sys.platform == "win32":
     try:
